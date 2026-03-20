@@ -16,13 +16,17 @@ from database import load_cases, save_case, update_case
 from auth import (register_patient, login_patient,
                   register_doctor, login_doctor)
 from styles import load_css
+from front_eye_analyzer import (analyze_front_eye,
+                                 get_front_eye_recommendations)
+from symptom_check import SYMPTOMS, triage
+from chat import render_chat, load_messages
 import tempfile
 import os
 
 st.set_page_config(
     page_title="Nayana — AI Eye Screening",
     page_icon="👁",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed"
 )
 st.markdown(load_css(), unsafe_allow_html=True)
@@ -32,8 +36,8 @@ DISEASE_NAMES = [
     'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Other'
 ]
 DISEASE_COLORS = [
-    '#10b981','#ef4444','#f97316','#3b82f6',
-    '#a855f7','#eab308','#06b6d4','#64748b'
+    '#2d9e6b','#e63946','#f4a261','#457b9d',
+    '#9b5de5','#f77f00','#00b4d8','#74c69d'
 ]
 
 for key, val in {
@@ -42,7 +46,12 @@ for key, val in {
     'patient_user': None,
     'doctor_logged_in': False,
     'doctor_user': None,
-    'page': 'screening'
+    'page': 'screening',
+    'doctor_page': 'cases',
+    'triage': None,
+    'front_cam_open': False,
+    'fundus_cam_open': False,
+    'screening_step': 1,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -55,21 +64,21 @@ def check_quality(image_np):
     blur  = cv2.Laplacian(gray, cv2.CV_64F).var()
     if blur < 100:
         score -= 30
-        tips.append("Image is blurry — hold the camera steady")
+        tips.append("Hold the camera steady — image is blurry")
     brightness = gray.mean()
     if brightness < 60:
         score -= 25
-        tips.append("Too dark — move to better lighting")
+        tips.append("Move to a brighter spot — too dark")
     elif brightness > 200:
         score -= 20
-        tips.append("Too bright — reduce light or move away")
+        tips.append("Reduce the light a bit — overexposed")
     circles = cv2.HoughCircles(
         gray, cv2.HOUGH_GRADIENT, 1, 20,
         param1=50, param2=30, minRadius=30, maxRadius=200
     )
     if circles is None:
         score -= 25
-        tips.append("Eye not detected — center the eye in frame")
+        tips.append("Centre your eye in the frame")
     return max(score, 0), tips
 
 def preprocess_retinal(image_pil):
@@ -115,8 +124,7 @@ def get_heatmap(image_pil):
     ])
     tensor = tf(image_pil).unsqueeze(0)
     m      = load_model()
-    cam    = GradCAM(model=m,
-                     target_layers=[m.blocks[-1][-1]])
+    cam    = GradCAM(model=m, target_layers=[m.blocks[-1][-1]])
     gcam   = cam(input_tensor=tensor)[0]
     rgb    = np.array(image_pil.resize((224,224))) / 255.0
     return show_cam_on_image(rgb.astype(np.float32),
@@ -126,85 +134,88 @@ def get_risk(probs):
     nn = [(DISEASE_NAMES[i], probs[i])
           for i in range(1,8) if probs[i] > 0.3]
     if not nn:
-        return "Low Risk — No significant findings", "low"
+        return "Looking good! No major concerns detected.", "low"
     elif max(p for _,p in nn) > 0.6:
         top = max(nn, key=lambda x: x[1])
-        return (f"High Risk — {top[0]} likely. "
-                f"Refer to specialist immediately."), "high"
+        return (f"Please see a specialist — "
+                f"{top[0]} detected."), "high"
     else:
-        return ("Moderate Risk — Follow-up recommended "
-                "within 4 weeks"), "moderate"
+        return "Some signs worth checking. Follow-up recommended.", "moderate"
 
-def dark_chart(probs):
+def green_chart(probs):
     fig, ax = plt.subplots(figsize=(7, 3.2))
-    fig.patch.set_facecolor('#0d1830')
-    ax.set_facecolor('#0d1830')
+    fig.patch.set_facecolor('#ffffff')
+    ax.set_facecolor('#ffffff')
     bars = ax.barh(DISEASE_NAMES, probs*100,
                    color=DISEASE_COLORS,
                    height=0.55, edgecolor='none')
-    ax.set_xlabel("Confidence (%)",
-                  color='#475569', fontsize=9)
+    ax.set_xlabel("Confidence (%)", color='#74c69d', fontsize=9)
     ax.set_xlim(0, 108)
-    ax.tick_params(colors='#64748b', labelsize=9)
+    ax.tick_params(colors='#2d6a4f', labelsize=9)
     for s in ax.spines.values():
-        s.set_color('#1e3a5f')
-    ax.axvline(50, color='#1e3a5f', lw=0.8, ls='--')
+        s.set_color('#b7e4c7')
+    ax.axvline(50, color='#b7e4c7', lw=0.8, ls='--')
     for bar, p in zip(bars, probs):
-        ax.text(p*100+1.5,
-                bar.get_y()+bar.get_height()/2,
-                f'{p*100:.1f}%',
-                va='center', fontsize=8.5, color='#64748b')
+        ax.text(p*100+1.5, bar.get_y()+bar.get_height()/2,
+                f'{p*100:.1f}%', va='center',
+                fontsize=8.5, color='#2d6a4f')
     plt.tight_layout(pad=0.5)
     return fig
 
 model = load_model()
 
-# ── Top navbar ─────────────────────────────────────────────────
+# ── Step bar ───────────────────────────────────────────────────
+def step_bar(current_step):
+    steps = ["Symptoms", "Eye Photos", "Results"]
+    html  = '<div class="step-bar">'
+    for i, label in enumerate(steps, 1):
+        if i < current_step:
+            dc, lc, di = "done",   "done",   "✓"
+        elif i == current_step:
+            dc, lc, di = "active", "active", str(i)
+        else:
+            dc, lc, di = "pending","pending",str(i)
+        html += f"""
+        <div class="step">
+            <div class="step-dot {dc}">{di}</div>
+            <span class="step-label {lc}">{label}</span>
+        </div>"""
+        if i < len(steps):
+            lc2 = "done" if i < current_step else ""
+            html += f'<div class="step-line {lc2}"></div>'
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+# ── Navbars ────────────────────────────────────────────────────
 def patient_navbar(user):
     st.markdown(f"""
-    <div style="display:flex;align-items:center;
-                justify-content:space-between;
-                padding:12px 0 16px;
-                border-bottom:1px solid rgba(245,158,11,0.12);
-                margin-bottom:28px;">
-        <div style="font-family:'Nunito',sans-serif;
-                    font-size:26px;font-weight:900;
-                    color:#f59e0b;letter-spacing:-1px;">
-            Nayana
-        </div>
-        <div style="font-size:13px;color:#475569;">
-            {user['name']} · Patient
-        </div>
+    <div class="topnav">
+        <div class="topnav-brand">👁 Nayana</div>
+        <div class="topnav-user">Hello, {user['name']} 👋</div>
     </div>
     """, unsafe_allow_html=True)
-
     c1,c2,c3,c4,c5 = st.columns([2,1,1,1,1])
-    if c2.button("🔬 Screening",
-                 type=("primary"
-                       if st.session_state['page']=='screening'
+    if c2.button("🔬 Screen",
+                 type=("primary" if st.session_state['page']=='screening'
                        else "secondary"),
-                 use_container_width=True,
-                 key="nav_scr"):
+                 use_container_width=True, key="nav_scr"):
         st.session_state['page'] = 'screening'
+        st.session_state['screening_step'] = 1
         st.rerun()
-    if c3.button("📋 My Results",
-                 type=("primary"
-                       if st.session_state['page']=='results'
+    if c3.button("📋 Results",
+                 type=("primary" if st.session_state['page']=='results'
                        else "secondary"),
-                 use_container_width=True,
-                 key="nav_res"):
+                 use_container_width=True, key="nav_res"):
         st.session_state['page'] = 'results'
         st.rerun()
     if c4.button("🏠 Home",
-                 use_container_width=True,
-                 key="nav_home"):
+                 use_container_width=True, key="nav_home"):
         st.session_state['role']              = None
         st.session_state['patient_logged_in'] = False
         st.session_state['patient_user']      = None
         st.rerun()
     if c5.button("Sign Out",
-                 use_container_width=True,
-                 key="nav_so"):
+                 use_container_width=True, key="nav_so"):
         st.session_state['patient_logged_in'] = False
         st.session_state['patient_user']      = None
         st.rerun()
@@ -212,40 +223,28 @@ def patient_navbar(user):
 
 def doctor_navbar(doc):
     st.markdown(f"""
-    <div style="display:flex;align-items:center;
-                justify-content:space-between;
-                padding:12px 0 16px;
-                border-bottom:1px solid rgba(59,130,246,0.2);
-                margin-bottom:28px;">
-        <div style="font-family:'Nunito',sans-serif;
-                    font-size:26px;font-weight:900;
-                    color:#f59e0b;letter-spacing:-1px;">
-            Nayana
-            <span style="font-size:12px;font-weight:600;
-                         color:#93c5fd;letter-spacing:1px;
-                         margin-left:8px;font-family:
-                         'Nunito Sans',sans-serif;">
-                DOCTOR
-            </span>
+    <div class="topnav">
+        <div class="topnav-brand">👁 Nayana
+            <span style="font-size:12px;font-weight:700;
+                         color:#2d9e6b;margin-left:8px;
+                         letter-spacing:2px;">DOCTOR</span>
         </div>
-        <div style="font-size:13px;color:#475569;">
-            Dr. {doc['name']} ·
-            {doc['specialization']}
-        </div>
+        <div class="topnav-user">Dr. {doc['name']}</div>
     </div>
     """, unsafe_allow_html=True)
-
-    c1,c2,c3 = st.columns([4,1,1])
-    if c2.button("🏠 Home",
-                 use_container_width=True,
-                 key="dnav_home"):
+    c1,c2,c3,c4 = st.columns([3,1,1,1])
+    if c2.button("💬 Messages",
+                 use_container_width=True, key="dnav_msg"):
+        st.session_state['doctor_page'] = 'messages'
+        st.rerun()
+    if c3.button("🏠 Home",
+                 use_container_width=True, key="dnav_home"):
         st.session_state['role']             = None
         st.session_state['doctor_logged_in'] = False
         st.session_state['doctor_user']      = None
         st.rerun()
-    if c3.button("Sign Out",
-                 use_container_width=True,
-                 key="dnav_so"):
+    if c4.button("Sign Out",
+                 use_container_width=True, key="dnav_so"):
         st.session_state['doctor_logged_in'] = False
         st.session_state['doctor_user']      = None
         st.rerun()
@@ -258,106 +257,102 @@ def render_my_results(my_cases):
         <div class="empty-state">
             <div class="empty-icon">👁</div>
             <div class="empty-title">No screenings yet</div>
-            <div class="empty-sub">Go to New Screening to
-            submit your first retinal scan</div>
+            <div class="empty-sub">Tap Screen to get started</div>
         </div>
         """, unsafe_allow_html=True)
         return
 
     total    = len(my_cases)
-    reviewed = sum(1 for c in my_cases
-                   if c['status']=='Reviewed')
+    reviewed = sum(1 for c in my_cases if c['status']=='Reviewed')
     pending  = total - reviewed
-    high     = sum(1 for c in my_cases
-                   if 'High' in c['risk_level'])
+    high     = sum(1 for c in my_cases if 'High' in c['risk_level']
+                   or 'specialist' in c['risk_level'])
 
     m1,m2,m3,m4 = st.columns(4)
     m1.metric("Total Scans", total)
     m2.metric("Reviewed",    reviewed)
     m3.metric("Pending",     pending)
-    m4.metric("High Risk",   high)
+    m4.metric("Urgent",      high)
     st.write("")
 
     for case in reversed(my_cases):
-        status = case['status']
-        risk   = case['risk_level']
-        icon   = "✅" if status=="Reviewed" else "⏳"
-        ri     = ("🔴" if "High" in risk
-                  else "🟡" if "Moderate" in risk else "🟢")
+        status   = case['status']
+        risk     = case['risk_level']
+        icon     = "✅" if status=="Reviewed" else "⏳"
+        ri       = ("🔴" if "High" in risk or "specialist" in risk
+                    else "🟡" if "Moderate" in risk
+                         or "follow" in risk.lower() else "🟢")
+        msgs     = load_messages(case['case_id'])
+        doc_msgs = [m for m in msgs if m['sender_role']=='doctor']
+        badge    = f" 💬 {len(doc_msgs)}" if doc_msgs else ""
 
         with st.expander(
             f"{icon} {case['case_id']} — "
-            f"{case['timestamp']} — {ri} {status}",
+            f"{case['timestamp']} — {ri} {status}{badge}",
             expanded=case['case_id']==st.session_state.get(
                 'last_case_id')
         ):
             c1,c2 = st.columns(2)
             with c1:
-                if os.path.exists(case['image_path']):
-                    st.image(
-                        Image.open(case['image_path']),
-                        caption="Retinal scan",
-                        width='stretch'
-                    )
-                if os.path.exists(case['heatmap_path']):
-                    st.image(
-                        Image.open(case['heatmap_path']),
-                        caption="AI heatmap",
-                        width='stretch'
-                    )
-            with c2:
-                st.markdown("**AI Results**")
-                probs = case['probs']
-                for i,(name,p) in enumerate(
-                    zip(DISEASE_NAMES,probs)
+                if case.get('image_path') and os.path.exists(
+                    case['image_path']
                 ):
+                    st.image(Image.open(case['image_path']),
+                             caption="Retinal scan",
+                             width='stretch')
+                if case.get('heatmap_path') and os.path.exists(
+                    case['heatmap_path']
+                ):
+                    st.image(Image.open(case['heatmap_path']),
+                             caption="AI heatmap",
+                             width='stretch')
+            with c2:
+                st.markdown("**What the AI found**")
+                probs = case['probs']
+                for i,(name,p) in enumerate(zip(DISEASE_NAMES,probs)):
                     if p > 0.3:
                         pc1,pc2 = st.columns([3,1])
                         pc1.progress(float(p), text=name)
-                        if p>0.7:
-                            pc2.error(f"{p*100:.0f}%")
-                        elif p>0.5:
-                            pc2.warning(f"{p*100:.0f}%")
-                        else:
-                            pc2.info(f"{p*100:.0f}%")
-                if "High" in risk:
-                    st.error(f"Risk: {risk}")
-                elif "Moderate" in risk:
-                    st.warning(f"Risk: {risk}")
+                        if p>0.7: pc2.error(f"{p*100:.0f}%")
+                        elif p>0.5: pc2.warning(f"{p*100:.0f}%")
+                        else: pc2.info(f"{p*100:.0f}%")
+                if "High" in risk or "specialist" in risk:
+                    st.error(f"⚠️ {risk}")
+                elif "Moderate" in risk or "follow" in risk.lower():
+                    st.warning(f"ℹ️ {risk}")
                 else:
-                    st.success(f"Risk: {risk}")
+                    st.success(f"✓ {risk}")
 
             st.divider()
-            st.markdown("**Doctor's Response**")
+            st.markdown("**Your doctor said:**")
             if status != "Reviewed":
-                st.info("Awaiting specialist review — "
-                        "check back in 24 hours")
+                st.info("⏳ Awaiting review — check back soon!")
             else:
-                st.success(
-                    f"Reviewed: {case.get('reviewed_at','')}"
-                )
+                st.success(f"✅ Reviewed: {case.get('reviewed_at','')}")
                 for lbl, val in [
-                    ("Diagnosis",
-                     case['doctor_diagnosis']),
-                    ("Treatment",
-                     case['doctor_prescription'] or "None given"),
+                    ("Diagnosis", case['doctor_diagnosis']),
+                    ("Treatment", case['doctor_prescription'] or "None given"),
                 ]:
                     r1,r2 = st.columns([1,3])
                     r1.markdown(f"**{lbl}**")
                     r2.info(val)
                 r1,r2 = st.columns([1,3])
-                r1.markdown("**Referral**")
+                r1.markdown("**Next Step**")
                 ref = case['doctor_referral']
                 if "Emergency" in ref or "Urgent" in ref:
-                    r2.error(ref)
+                    r2.error(f"🚨 {ref}")
                 elif "month" in ref:
-                    r2.warning(ref)
+                    r2.warning(f"📅 {ref}")
                 else:
-                    r2.success(ref)
+                    r2.success(f"✓ {ref}")
                 if case['doctor_notes']:
                     r1,r2 = st.columns([1,3])
                     r1.markdown("**Notes**")
                     r2.info(case['doctor_notes'])
+
+            st.divider()
+            render_chat(case['case_id'], 'patient',
+                        st.session_state['patient_user']['name'])
 
 # ══════════════════════════════════════════════════════════════
 # LANDING
@@ -368,17 +363,17 @@ if st.session_state['role'] is None:
         <div class="nayana-wordmark">Nayana</div>
         <div class="nayana-meaning">नयन · the eye</div>
         <div class="nayana-tagline">
-            AI-powered retinal screening that connects rural
-            patients to city specialists in minutes, not months.
+            Free AI eye screening — get results in 3 minutes
+            and connect with a specialist from anywhere.
         </div>
         <div class="stat-row">
             <div class="stat-item">
                 <div class="stat-num">8</div>
-                <div class="stat-lbl">diseases screened</div>
+                <div class="stat-lbl">conditions checked</div>
             </div>
             <div class="stat-item">
                 <div class="stat-num">6,392</div>
-                <div class="stat-lbl">training records</div>
+                <div class="stat-lbl">cases trained on</div>
             </div>
             <div class="stat-item">
                 <div class="stat-num">5</div>
@@ -386,49 +381,43 @@ if st.session_state['role'] is None:
             </div>
             <div class="stat-item">
                 <div class="stat-num">3 min</div>
-                <div class="stat-lbl">scan to specialist</div>
+                <div class="stat-lbl">to get results</div>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown(
-        '<div style="text-align:center;margin-bottom:24px;">'
-        '<span style="font-family:Nunito,sans-serif;'
-        'font-size:20px;font-weight:800;color:#f0f4ff;">'
-        'Who are you?</span></div>',
-        unsafe_allow_html=True
-    )
+        '<div style="text-align:center;margin-bottom:28px;">'
+        '<span style="font-family:Nunito,sans-serif;font-size:22px;'
+        'font-weight:800;color:#0d3b2e;">I am a...</span></div>',
+        unsafe_allow_html=True)
 
     _,c1,c2,_ = st.columns([1,1,1,1])
     with c1:
         st.markdown("""
-        <div class="portal-card patient">
-            <div class="portal-icon">🧑‍⚕️</div>
-            <div class="portal-title">I am a Patient</div>
-            <div class="portal-sub">Upload retinal images,
-            describe symptoms, receive AI screening results</div>
+        <div class="portal-card">
+            <div class="portal-icon">🧑</div>
+            <div class="portal-title">Patient</div>
+            <div class="portal-sub">Screen my eyes and get
+            expert feedback</div>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("Enter Patient Portal →",
-                     type="primary",
-                     use_container_width=True,
-                     key="go_patient"):
+        if st.button("Start Screening →", type="primary",
+                     use_container_width=True, key="go_patient"):
             st.session_state['role'] = 'patient'
             st.rerun()
-
     with c2:
         st.markdown("""
-        <div class="portal-card doctor">
+        <div class="portal-card">
             <div class="portal-icon">👨‍⚕️</div>
-            <div class="portal-title">I am a Doctor</div>
-            <div class="portal-sub">Review AI-augmented cases,
-            issue diagnoses and e-prescriptions</div>
+            <div class="portal-title">Doctor</div>
+            <div class="portal-sub">Review cases and help
+            patients remotely</div>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("Enter Doctor Portal →",
-                     use_container_width=True,
-                     key="go_doctor"):
+        if st.button("Review Cases →",
+                     use_container_width=True, key="go_doctor"):
             st.session_state['role'] = 'doctor'
             st.rerun()
 
@@ -438,31 +427,28 @@ if st.session_state['role'] is None:
 elif st.session_state['role'] == 'patient':
 
     if not st.session_state['patient_logged_in']:
-        _,col,_ = st.columns([1,1.4,1])
+        _,col,_ = st.columns([1,1.6,1])
         with col:
+            st.markdown("""
+            <div style="text-align:center;margin-bottom:8px;">
+                <span style="font-family:Nunito,sans-serif;
+                font-size:32px;font-weight:900;color:#2d9e6b;">
+                👁 Nayana</span>
+            </div>
+            """, unsafe_allow_html=True)
             st.markdown(
-                '<div class="page-title" '
-                'style="text-align:center;">'
-                'Patient Portal</div>',
-                unsafe_allow_html=True
-            )
-            st.markdown(
-                '<div class="page-sub" '
-                'style="text-align:center;">'
-                'Sign in or create an account</div>',
-                unsafe_allow_html=True
-            )
+                '<div class="page-sub" style="text-align:center;">'
+                'Sign in or create a free account</div>',
+                unsafe_allow_html=True)
             tab1,tab2 = st.tabs(["Sign In","Create Account"])
 
             with tab1:
                 st.write("")
-                email = st.text_input(
-                    "Email", key="li_e",
-                    placeholder="you@example.com"
-                )
-                pw = st.text_input(
-                    "Password", type="password", key="li_p"
-                )
+                email = st.text_input("Email address", key="li_e",
+                                       placeholder="you@example.com")
+                pw    = st.text_input("Password", type="password",
+                                       key="li_p",
+                                       placeholder="Your password")
                 st.write("")
                 if st.button("Sign In →", type="primary",
                              key="li_btn",
@@ -470,17 +456,15 @@ elif st.session_state['role'] == 'patient':
                     if email and pw:
                         ok,user,msg = login_patient(email, pw)
                         if ok:
-                            st.session_state[
-                                'patient_logged_in'] = True
-                            st.session_state[
-                                'patient_user'] = user
+                            st.session_state['patient_logged_in'] = True
+                            st.session_state['patient_user']      = user
                             st.rerun()
                         else:
                             st.error(msg)
                     else:
                         st.error("Please fill in both fields")
                 st.write("")
-                if st.button("← Back", key="back_p",
+                if st.button("← Back to home", key="back_p",
                              use_container_width=True):
                     st.session_state['role'] = None
                     st.rerun()
@@ -488,17 +472,17 @@ elif st.session_state['role'] == 'patient':
             with tab2:
                 st.write("")
                 c1,c2 = st.columns(2)
-                rn  = c1.text_input("Full name",  key="rn")
+                rn  = c1.text_input("Your name",  key="rn")
                 ra  = c2.number_input("Age",1,120,30, key="ra")
-                rg  = st.selectbox(
-                    "Gender",
-                    ["Male","Female","Other"], key="rg"
-                )
-                re  = st.text_input("Email", key="re")
+                rg  = st.selectbox("Gender",
+                                    ["Male","Female","Other"],
+                                    key="rg")
+                re  = st.text_input("Email", key="re",
+                                     placeholder="you@example.com")
                 c1,c2 = st.columns(2)
                 rp  = c1.text_input("Password",
                                      type="password", key="rp")
-                rp2 = c2.text_input("Confirm",
+                rp2 = c2.text_input("Confirm password",
                                      type="password", key="rp2")
                 st.write("")
                 if st.button("Create Account →",
@@ -507,15 +491,13 @@ elif st.session_state['role'] == 'patient':
                     if not all([rn,re,rp,rp2]):
                         st.error("Please fill in all fields")
                     elif rp != rp2:
-                        st.error("Passwords do not match")
+                        st.error("Passwords don't match")
                     elif len(rp) < 6:
                         st.error("Min 6 characters")
                     else:
-                        ok,msg = register_patient(
-                            rn,ra,rg,re,rp)
+                        ok,msg = register_patient(rn,ra,rg,re,rp)
                         if ok:
-                            st.success(
-                                "Account created! Sign in.")
+                            st.success("Account created! Sign in now.")
                         else:
                             st.error(msg)
     else:
@@ -523,331 +505,486 @@ elif st.session_state['role'] == 'patient':
         patient_navbar(user)
 
         if st.session_state['page'] == 'screening':
-            st.markdown(
-                '<div class="page-title">New Screening</div>',
-                unsafe_allow_html=True
-            )
-            st.markdown(
-                '<div class="page-sub">Upload a retinal image '
-                'for AI-powered multi-disease analysis</div>',
-                unsafe_allow_html=True
-            )
 
-            with st.expander("Patient Details",
-                             expanded=True):
-                c1,c2,c3 = st.columns(3)
-                pname   = c1.text_input(
-                    "Name", value=user['name'])
-                page_   = c2.number_input(
-                    "Age",1,120, value=user['age'])
-                pgender = c3.selectbox(
-                    "Gender",["Male","Female","Other"],
-                    index=["Male","Female","Other"].index(
-                        user['gender'])
-                )
+            step_bar(st.session_state.get('screening_step', 1))
 
-            with st.expander("Symptom Input", expanded=True):
+            # ── STEP 1: Symptoms ───────────────────────────
+            if st.session_state['screening_step'] == 1:
+                st.markdown(
+                    '<div class="page-title">How are your eyes feeling?</div>',
+                    unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="page-sub">Answer a few quick questions so '
+                    'we know which test is right for you</div>',
+                    unsafe_allow_html=True)
+
+                with st.expander("Your Details", expanded=True):
+                    c1,c2,c3 = st.columns(3)
+                    pname   = c1.text_input("Name", value=user['name'])
+                    page_   = c2.number_input("Age",1,120,value=user['age'])
+                    pgender = c3.selectbox(
+                        "Gender",["Male","Female","Other"],
+                        index=["Male","Female","Other"].index(user['gender']))
+                    st.session_state['pname']   = pname
+                    st.session_state['page_']   = page_
+                    st.session_state['pgender'] = pgender
+
+                st.write("")
+                st.markdown(
+                    '<div class="section-label">Describe your symptoms (optional)</div>',
+                    unsafe_allow_html=True)
                 method = st.radio(
-                    "Method",["Type","Voice"],
-                    horizontal=True
-                )
-                if method == "Type":
-                    symp = st.text_input(
-                        "Symptoms",
-                        placeholder="blurred vision, eye pain..."
-                    )
+                    "How would you like to describe symptoms?",
+                    ["✍️ Type","🎤 Voice"], horizontal=True)
+                if method == "✍️ Type":
+                    symp     = st.text_input(
+                        "What's bothering you?",
+                        placeholder="e.g. blurry vision, redness, pain...")
                     detected = symp or "Not specified"
                 else:
                     lang = st.selectbox(
-                        "Language",
-                        ["Kannada","Hindi","Tamil",
-                         "Telugu","English"]
-                    )
-                    if st.button("🎤  Start Recording",
-                                 type="primary"):
-                        with st.spinner(
-                            f"Listening in {lang}..."
-                        ):
+                        "Choose your language",
+                        ["Kannada","Hindi","Tamil","Telugu","English"])
+                    if st.button("🎤  Tap to Record", type="primary"):
+                        with st.spinner(f"Listening in {lang}..."):
                             res = record_voice(lang)
                         if res["success"]:
-                            st.success(
-                                f"Heard: {res['text']}")
+                            st.success(f"Got it: {res['text']}")
                             if lang != "English":
-                                st.caption(
-                                    f"Translated: "
-                                    f"{res.get('english_text','')}"
-                                )
-                            st.info(
-                                f"Symptoms: "
-                                f"{', '.join(res['symptoms'])}"
-                            )
-                            detected = ", ".join(
-                                res["symptoms"])
-                            st.session_state[
-                                'symptoms'] = detected
-                            st.session_state[
-                                'raw_speech'] = res['text']
+                                st.caption(f"English: {res.get('english_text','')}")
+                            st.info(f"Symptoms noted: {', '.join(res['symptoms'])}")
+                            detected = ", ".join(res["symptoms"])
+                            st.session_state['symptoms']   = detected
+                            st.session_state['raw_speech'] = res['text']
                         else:
                             st.error(res["error"])
                             detected = "Not specified"
                     else:
-                        detected = st.session_state.get(
-                            'symptoms','Not specified')
-                symp_final = detected
+                        detected = st.session_state.get('symptoms','Not specified')
+                st.session_state['symp_final'] = detected
 
-            st.write("")
-            st.markdown(
-                '<div class="section-label">'
-                'Retinal Image</div>',
-                unsafe_allow_html=True
-            )
-            uploaded = st.file_uploader(
-                "Upload", type=["jpg","jpeg","png"],
-                label_visibility="collapsed"
-            )
+                st.write("")
+                st.markdown(
+                    '<div class="section-label">Tick anything that applies</div>',
+                    unsafe_allow_html=True)
+                answers = {}
+                cols = st.columns(2)
+                for idx, question in enumerate(SYMPTOMS):
+                    with cols[idx % 2]:
+                        answers[question] = st.checkbox(
+                            question, key=f"q_{question}")
+                st.session_state['triage'] = triage(answers)
 
-            if uploaded:
-                image_pil = Image.open(
-                    uploaded).convert('RGB')
-                image_np  = np.array(image_pil)
+                st.write("")
+                if st.button("Continue to Eye Photos →",
+                             type="primary",
+                             use_container_width=True):
+                    st.session_state['screening_step'] = 2
+                    st.rerun()
 
-                c1,c2 = st.columns([1,1.6])
-                with c1:
-                    st.image(
-                        image_pil,
-                        use_container_width=True,
-                        caption="Uploaded image"
-                    )
-                with c2:
-                    score, tips = check_quality(image_np)
-                    qc = ("#10b981" if score>=70
-                          else "#f59e0b" if score>=40
-                          else "#ef4444")
-                    ql = ("Good" if score>=70
-                          else "Fair" if score>=40
-                          else "Poor")
+            # ── STEP 2: Eye Photos ─────────────────────────
+            elif st.session_state['screening_step'] == 2:
+                st.markdown(
+                    '<div class="page-title">Take Your Eye Photos</div>',
+                    unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="page-sub">Upload a front eye photo and/or '
+                    'a retinal scan</div>',
+                    unsafe_allow_html=True)
+
+                triage_result = st.session_state.get('triage','front')
+                if triage_result == 'fundus':
+                    st.warning("⚠️ Based on your symptoms, we recommend a retinal scan.")
+                else:
+                    st.success("✓ A front-eye photo may be enough. You can also add a retinal scan below.")
+
+                # Front eye
+                st.markdown(
+                    '<div class="page-title" style="font-size:22px;'
+                    'margin-top:16px;">📷 Front Eye Photo</div>',
+                    unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="page-sub">Close-up of your eye '
+                    'in good lighting</div>',
+                    unsafe_allow_html=True)
+
+                front_method = st.radio(
+                    "Capture method",
+                    ["📷 Use Camera","📁 Upload Photo"],
+                    horizontal=True, key="front_method")
+
+                front_up = None
+                if front_method == "📷 Use Camera":
+                    if st.button("📷 Open Camera",
+                                 key="open_front_cam",
+                                 type="primary"):
+                        st.session_state['front_cam_open'] = True
+                    if st.session_state.get('front_cam_open'):
+                        front_up = st.camera_input(
+                            "Point at your eye",
+                            key="front_camera")
+                else:
+                    front_up = st.file_uploader(
+                        "Choose front eye photo",
+                        type=["jpg","jpeg","png"],
+                        key="front_eye_upload")
+
+                if front_up:
+                    front_pil = Image.open(front_up).convert('RGB')
+                    st.session_state['front_pil'] = front_pil
+                    fc1,fc2 = st.columns([1,1.6])
+                    with fc1:
+                        st.image(front_pil, caption="Your eye",
+                                 use_container_width=True)
+                    with fc2:
+                        with st.spinner("Checking your eye..."):
+                            fe_res = analyze_front_eye(front_pil)
+                            recs, high_risk, needs_fundus = \
+                                get_front_eye_recommendations(fe_res)
+                        st.session_state['fe_results'] = fe_res
+                        st.session_state['fe_recs']    = recs
+                        st.markdown("**Quick findings:**")
+                        for cond, score in sorted(
+                            fe_res.items(),
+                            key=lambda x: x[1], reverse=True):
+                            col = ("#e63946" if score>0.6
+                                   else "#f4a261" if score>0.3
+                                   else "#2d9e6b")
+                            st.markdown(f"""
+                            <div style="display:flex;justify-content:space-between;
+                                align-items:center;padding:8px 0;
+                                border-bottom:1px solid #d8f3dc;">
+                                <span style="font-size:14px;color:#0d3b2e;
+                                    font-weight:600;">{cond}</span>
+                                <span style="font-size:15px;font-weight:800;
+                                    color:{col};">{score*100:.0f}%</span>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    if recs:
+                        for rec in recs:
+                            st.warning(f"💡 {rec}")
+                    if needs_fundus:
+                        st.error("🔍 Retinal scan recommended based on findings.")
+
+                st.write("")
+                st.divider()
+
+                # Fundus
+                st.markdown(
+                    '<div class="page-title" style="font-size:22px;">'
+                    '🔬 Retinal Scan (Fundus)</div>',
+                    unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="page-sub">For a deeper look — '
+                    'upload if you have one</div>',
+                    unsafe_allow_html=True)
+
+                fundus_method = st.radio(
+                    "Capture method",
+                    ["📷 Use Camera","📁 Upload Image"],
+                    horizontal=True, key="fundus_method")
+
+                uploaded = None
+                if fundus_method == "📷 Use Camera":
+                    if st.button("📷 Open Camera",
+                                 key="open_fundus_cam",
+                                 type="primary"):
+                        st.session_state['fundus_cam_open'] = True
+                    if st.session_state.get('fundus_cam_open'):
+                        uploaded = st.camera_input(
+                            "Capture retinal image",
+                            key="fundus_camera")
+                else:
+                    uploaded = st.file_uploader(
+                        "Upload fundus image",
+                        type=["jpg","jpeg","png"],
+                        key="fundus_upload",
+                        label_visibility="collapsed")
+
+                if uploaded:
+                    image_pil = Image.open(uploaded).convert('RGB')
+                    st.session_state['fundus_pil'] = image_pil
+                    c1,c2 = st.columns([1,1.6])
+                    with c1:
+                        st.image(image_pil, caption="Fundus image",
+                                 use_container_width=True)
+                    with c2:
+                        score, tips = check_quality(np.array(image_pil))
+                        qc = ("#2d9e6b" if score>=70
+                              else "#f4a261" if score>=40
+                              else "#e63946")
+                        ql = ("Great!" if score>=70
+                              else "Okay" if score>=40 else "Poor")
+                        st.markdown(f"""
+                        <div class="card">
+                            <div class="section-label">Photo quality</div>
+                            <div class="quality-num" style="color:{qc};">
+                                {score}%</div>
+                            <div style="font-size:14px;color:#2d6a4f;">
+                                {ql}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        for tip in tips:
+                            st.warning(f"💡 {tip}")
+                    st.session_state['fundus_score'] = score
+                    st.session_state['fundus_tips']  = tips
+
+                st.write("")
+                has_any = (st.session_state.get('front_pil') is not None
+                           or st.session_state.get('fundus_pil') is not None)
+                if has_any:
+                    if st.button("See My Results →",
+                                 type="primary",
+                                 use_container_width=True):
+                        st.session_state['screening_step'] = 3
+                        st.rerun()
+                else:
+                    st.info("📸 Upload at least one photo to continue.")
+
+                st.write("")
+                if st.button("← Back to Symptoms",
+                             use_container_width=True):
+                    st.session_state['screening_step'] = 1
+                    st.rerun()
+
+            # ── STEP 3: Results ────────────────────────────
+            elif st.session_state['screening_step'] == 3:
+                pname      = st.session_state.get('pname', user['name'])
+                page_      = st.session_state.get('page_', user['age'])
+                pgender    = st.session_state.get('pgender', user['gender'])
+                symp_final = st.session_state.get('symp_final','Not specified')
+                front_pil  = st.session_state.get('front_pil')
+                fundus_pil = st.session_state.get('fundus_pil')
+                score      = st.session_state.get('fundus_score', 0)
+                tips       = st.session_state.get('fundus_tips', [])
+                fe_results = st.session_state.get('fe_results', {})
+                fe_recs    = st.session_state.get('fe_recs', [])
+
+                st.markdown(
+                    '<div class="page-title">Your Results</div>',
+                    unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="page-sub">Here\'s what our AI found</div>',
+                    unsafe_allow_html=True)
+
+                # Front eye
+                if front_pil and fe_results:
+                    st.markdown("### 👁 Front Eye Analysis")
+                    fc1,fc2 = st.columns([1,2])
+                    with fc1:
+                        st.image(front_pil, caption="Your eye",
+                                 use_container_width=True)
+                    with fc2:
+                        for cond, s in sorted(
+                            fe_results.items(),
+                            key=lambda x: x[1], reverse=True):
+                            col = ("#e63946" if s>0.6
+                                   else "#f4a261" if s>0.3
+                                   else "#2d9e6b")
+                            st.markdown(f"""
+                            <div style="display:flex;justify-content:space-between;
+                                align-items:center;padding:8px 0;
+                                border-bottom:1px solid #d8f3dc;">
+                                <span style="font-size:14px;color:#0d3b2e;
+                                    font-weight:600;">{cond}</span>
+                                <span style="font-size:15px;font-weight:800;
+                                    color:{col};">{s*100:.0f}%</span>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    if fe_recs:
+                        for rec in fe_recs:
+                            st.warning(f"💡 {rec}")
+                    st.write("")
+
+                # Fundus
+                probs   = None
+                heatmap = None
+                risk_txt = "No retinal scan provided"
+                det_conds = []
+
+                if fundus_pil:
+                    st.markdown("### 🔬 Retinal Scan Analysis")
+                    with st.spinner("Analysing your scan..."):
+                        probs   = predict(fundus_pil)
+                        heatmap = get_heatmap(fundus_pil)
+                    st.session_state['probs']   = probs
+                    st.session_state['heatmap'] = heatmap
+
+                    fig = green_chart(probs)
+                    st.pyplot(fig)
+                    plt.close()
+
+                    risk_txt, risk_type = get_risk(probs)
+                    risk_css = {
+                        "high": "risk-high",
+                        "moderate": "risk-moderate",
+                        "low": "risk-low"
+                    }[risk_type]
+                    threshold = 0.5
+                    det_conds = [(DISEASE_NAMES[i], probs[i])
+                                 for i in range(8)
+                                 if probs[i] > threshold]
+
+                    card_cls = ("highlight" if risk_type=='low'
+                                else "warning" if risk_type=='moderate'
+                                else "danger")
                     st.markdown(f"""
-                    <div class="card">
-                        <div class="section-label">
-                            Image quality
+                    <div class="card {card_cls}">
+                        <div style="display:flex;align-items:center;
+                            justify-content:space-between;margin-bottom:8px;">
+                            <div style="font-size:16px;font-weight:800;
+                                font-family:'Nunito',sans-serif;
+                                color:#0d3b2e;">Overall Result</div>
+                            <span class="risk-pill {risk_css}">
+                                {risk_type.title()} Risk</span>
                         </div>
-                        <div class="quality-num"
-                             style="color:{qc};">
-                            {score}%
-                        </div>
-                        <div style="font-size:13px;
-                                    color:#64748b;">
-                            {ql} — {'ready for analysis'
-                                    if score>=70 else
-                                    'proceed with caution'
-                                    if score>=40 else
-                                    'retake recommended'}
-                        </div>
+                        <div style="font-size:15px;color:#2d6a4f;">
+                            {risk_txt}</div>
                     </div>
                     """, unsafe_allow_html=True)
-                    for tip in tips:
-                        st.warning(f"⚠ {tip}")
+
+                    for name,p in sorted(det_conds,
+                                          key=lambda x: x[1],
+                                          reverse=True):
+                        if name == 'Normal':
+                            st.success(f"✓ {name} — {p*100:.1f}%")
+                        elif p > 0.7:
+                            st.error(f"⚠️ {name} — {p*100:.1f}%")
+                        else:
+                            st.warning(f"⚠ {name} — {p*100:.1f}%")
+
+                    st.write("")
+                    st.markdown("### 🗺️ Where the AI looked")
+                    hc1,hc2 = st.columns(2)
+                    hc1.image(fundus_pil.resize((224,224)),
+                              caption="Your scan", width=220)
+                    hc2.image(heatmap, caption="AI focus", width=220)
 
                 st.divider()
-                st.markdown(
-                    '<div class="page-title" '
-                    'style="font-size:22px;">'
-                    'AI Analysis</div>',
-                    unsafe_allow_html=True
-                )
-
-                with st.spinner("Running analysis..."):
-                    probs = predict(image_pil)
-
-                fig = dark_chart(probs)
-                st.pyplot(fig)
-                plt.close()
-
-                risk_txt, risk_type = get_risk(probs)
-                risk_css = {
-                    "high":     "risk-high",
-                    "moderate": "risk-moderate",
-                    "low":      "risk-low"
-                }[risk_type]
-                threshold = 0.5
-                det_conds = [
-                    (DISEASE_NAMES[i], probs[i])
-                    for i in range(8)
-                    if probs[i] > threshold
-                ]
-
-                st.markdown(f"""
-                <div class="card">
-                    <div style="display:flex;
-                        align-items:center;
-                        justify-content:space-between;
-                        margin-bottom:10px;">
-                        <div style="font-size:15px;
-                            font-weight:700;
-                            font-family:'Nunito',sans-serif;
-                            color:#f0f4ff;">
-                            Overall Assessment
-                        </div>
-                        <span class="risk-pill {risk_css}">
-                            {risk_type.title()} Risk
-                        </span>
-                    </div>
-                    <div style="font-size:13px;
-                                color:#64748b;">
-                        {risk_txt}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                for name,p in sorted(
-                    det_conds,
-                    key=lambda x: x[1], reverse=True
-                ):
-                    if name == 'Normal':
-                        st.success(
-                            f"✓ {name} — {p*100:.1f}%")
-                    elif p > 0.7:
-                        st.error(
-                            f"⚠ {name} detected — "
-                            f"{p*100:.1f}%")
-                    else:
-                        st.warning(
-                            f"⚠ {name} possible — "
-                            f"{p*100:.1f}%")
-
-                st.divider()
-                st.markdown(
-                    '<div class="page-title" '
-                    'style="font-size:22px;">'
-                    'AI Attention Heatmap</div>',
-                    unsafe_allow_html=True
-                )
-                st.markdown(
-                    '<div class="page-sub" '
-                    'style="margin-bottom:16px;">'
-                    'Red areas indicate where the AI '
-                    'detected abnormalities</div>',
-                    unsafe_allow_html=True
-                )
-                with st.spinner("Generating heatmap..."):
-                    heatmap = get_heatmap(image_pil)
-                hc1,hc2 = st.columns(2)
-                hc1.image(
-                    image_pil.resize((224,224)),
-                    caption="Original", width=220
-                )
-                hc2.image(
-                    heatmap,
-                    caption="AI attention", width=220
-                )
-
-                st.divider()
+                st.markdown("### What would you like to do?")
                 ac1,ac2 = st.columns(2)
 
                 with ac1:
-                    st.markdown(
-                        '<div class="section-label">'
-                        'Send to specialist</div>',
-                        unsafe_allow_html=True
-                    )
-                    if st.button(
-                        "📤  Send to Doctor",
-                        use_container_width=True
-                    ):
-                        with st.spinner("Sending..."):
-                            os.makedirs("cases_images",
-                                        exist_ok=True)
-                            n  = len(os.listdir(
-                                "cases_images"))
-                            ip = (f"cases_images/"
-                                  f"{pname.replace(' ','_')}"
-                                  f"_{n}_original.png")
-                            hp = (f"cases_images/"
-                                  f"{pname.replace(' ','_')}"
-                                  f"_{n}_heatmap.png")
-                            image_pil.resize(
-                                (300,300)).save(ip)
-                            Image.fromarray(
-                                heatmap).save(hp)
+                    if st.button("📤  Send to a Doctor",
+                                 type="primary",
+                                 use_container_width=True):
+                        with st.spinner("Sending your case..."):
+                            os.makedirs("cases_images", exist_ok=True)
+                            n = len(os.listdir("cases_images"))
+
+                            ip, hp, fp = "", "", ""
+                            if fundus_pil and heatmap is not None:
+                                ip = (f"cases_images/"
+                                      f"{pname.replace(' ','_')}"
+                                      f"_{n}_original.png")
+                                hp = (f"cases_images/"
+                                      f"{pname.replace(' ','_')}"
+                                      f"_{n}_heatmap.png")
+                                fundus_pil.resize((300,300)).save(ip)
+                                Image.fromarray(heatmap).save(hp)
+
+                            if front_pil:
+                                fp = (f"cases_images/"
+                                      f"{pname.replace(' ','_')}"
+                                      f"_{n}_front.png")
+                                front_pil.resize((300,300)).save(fp)
+
+                            fe_str = ""
+                            if fe_results:
+                                fe_str = " | Front-eye: " + " | ".join(
+                                    f"{c}: {s*100:.0f}%"
+                                    for c,s in sorted(
+                                        fe_results.items(),
+                                        key=lambda x: x[1],
+                                        reverse=True))
+
                             cid = save_case(
                                 patient_name=pname,
-                                patient_age=page_,
+                                patient_age=int(page_),
                                 patient_gender=pgender,
-                                symptoms=symp_final,
+                                symptoms=symp_final + fe_str,
                                 quality_score=score,
-                                probs=probs,
+                                probs=probs if probs is not None
+                                      else np.zeros(8),
                                 detected_conditions=det_conds,
                                 risk_level=risk_txt,
                                 image_path=ip,
                                 heatmap_path=hp,
-                                patient_email=user['email']
-                            )
-                        st.success(
-                            f"Sent! Case ID: **{cid}**")
-                        st.session_state[
-                            'last_case_id'] = cid
+                                patient_email=user['email'])
+                        st.success(f"✅ Sent! Case ID: **{cid}**")
+                        st.session_state['last_case_id'] = cid
 
                 with ac2:
-                    st.markdown(
-                        '<div class="section-label">'
-                        'Download report</div>',
-                        unsafe_allow_html=True
-                    )
-                    if st.button(
-                        "📄  Generate PDF",
-                        type="primary",
-                        use_container_width=True
-                    ):
-                        with st.spinner("Generating..."):
-                            with tempfile.NamedTemporaryFile(
-                                delete=False, suffix='.pdf'
-                            ) as tmp:
-                                pdf_path = generate_report(
-                                    patient_name=pname,
-                                    patient_age=page_,
-                                    patient_gender=pgender,
-                                    symptoms=symp_final,
-                                    quality_score=score,
-                                    quality_tips=tips,
-                                    probs=probs,
-                                    detected_conditions=det_conds,
-                                    risk_level=risk_txt,
-                                    original_image_pil=image_pil,
-                                    heatmap_array=heatmap,
-                                    output_path=tmp.name
-                                )
-                        with open(pdf_path,'rb') as f:
-                            st.download_button(
-                                "⬇  Download PDF",
-                                data=f.read(),
-                                file_name=f"nayana_{pname.replace(' ','_')}.pdf",
-                                mime="application/pdf",
-                                use_container_width=True
-                            )
+                    if fundus_pil and probs is not None:
+                        if st.button("📄  Download Report",
+                                     use_container_width=True):
+                            with st.spinner("Building report..."):
+                                fe_str = ""
+                                if fe_results:
+                                    fe_str = "\n\nFront Eye Findings:\n" + \
+                                        "\n".join(
+                                            f"  • {c}: {s*100:.0f}%"
+                                            for c,s in sorted(
+                                                fe_results.items(),
+                                                key=lambda x: x[1],
+                                                reverse=True))
+                                    if fe_recs:
+                                        fe_str += "\n\nFront Eye Recommendations:\n" + \
+                                            "\n".join(f"  • {r}"
+                                                      for r in fe_recs)
+                                with tempfile.NamedTemporaryFile(
+                                    delete=False, suffix='.pdf'
+                                ) as tmp:
+                                    pdf_path = generate_report(
+                                        patient_name=pname,
+                                        patient_age=int(page_),
+                                        patient_gender=pgender,
+                                        symptoms=symp_final + fe_str,
+                                        quality_score=score,
+                                        quality_tips=tips,
+                                        probs=probs,
+                                        detected_conditions=det_conds,
+                                        risk_level=risk_txt,
+                                        original_image_pil=fundus_pil,
+                                        heatmap_array=heatmap,
+                                        output_path=tmp.name)
+                            with open(pdf_path,'rb') as f:
+                                st.download_button(
+                                    "⬇  Download PDF",
+                                    data=f.read(),
+                                    file_name=f"nayana_{pname.replace(' ','_')}.pdf",
+                                    mime="application/pdf",
+                                    use_container_width=True)
+                    else:
+                        st.info("Add a retinal scan to download a report")
 
                 st.write("")
-                st.caption(
-                    "Nayana provides AI-assisted screening "
-                    "only. A qualified ophthalmologist must "
-                    "confirm all diagnoses."
-                )
+                if st.button("← Start a New Screening",
+                             use_container_width=True):
+                    for k in ['front_pil','fundus_pil','fe_results',
+                              'fe_recs','probs','heatmap',
+                              'fundus_score','fundus_tips']:
+                        st.session_state[k] = None
+                    st.session_state['front_cam_open']  = False
+                    st.session_state['fundus_cam_open'] = False
+                    st.session_state['screening_step']  = 1
+                    st.rerun()
+
+                st.write("")
+                st.caption("Nayana is for screening only. Always follow your doctor's advice.")
 
         elif st.session_state['page'] == 'results':
             st.markdown(
                 '<div class="page-title">My Results</div>',
-                unsafe_allow_html=True
-            )
+                unsafe_allow_html=True)
             st.markdown(
-                '<div class="page-sub">Your complete '
-                'screening history and doctor '
-                'responses</div>',
-                unsafe_allow_html=True
-            )
+                '<div class="page-sub">Your screening history '
+                'and doctor responses</div>',
+                unsafe_allow_html=True)
             all_cases = load_cases()
-            my_cases  = [
-                c for c in all_cases
-                if c.get('patient_email','') == user['email']
-            ]
+            my_cases  = [c for c in all_cases
+                         if c.get('patient_email','') == user['email']]
             render_my_results(my_cases)
 
 # ══════════════════════════════════════════════════════════════
@@ -856,31 +993,27 @@ elif st.session_state['role'] == 'patient':
 elif st.session_state['role'] == 'doctor':
 
     if not st.session_state['doctor_logged_in']:
-        _,col,_ = st.columns([1,1.4,1])
+        _,col,_ = st.columns([1,1.6,1])
         with col:
+            st.markdown("""
+            <div style="text-align:center;margin-bottom:8px;">
+                <span style="font-family:Nunito,sans-serif;
+                font-size:32px;font-weight:900;color:#2d9e6b;">
+                👁 Nayana</span>
+            </div>
+            """, unsafe_allow_html=True)
             st.markdown(
-                '<div class="page-title" '
-                'style="text-align:center;">'
-                'Doctor Portal</div>',
-                unsafe_allow_html=True
-            )
-            st.markdown(
-                '<div class="page-sub" '
-                'style="text-align:center;">'
-                'Sign in to review patient cases</div>',
-                unsafe_allow_html=True
-            )
+                '<div class="page-sub" style="text-align:center;">'
+                'Doctor login</div>',
+                unsafe_allow_html=True)
             tab1,tab2 = st.tabs(["Sign In","Register"])
 
             with tab1:
                 st.write("")
-                de = st.text_input(
-                    "Email", key="dli_e",
-                    placeholder="doctor@hospital.com"
-                )
-                dp = st.text_input(
-                    "Password", type="password", key="dli_p"
-                )
+                de = st.text_input("Email", key="dli_e",
+                                    placeholder="doctor@hospital.com")
+                dp = st.text_input("Password",
+                                    type="password", key="dli_p")
                 st.write("")
                 if st.button("Sign In →", type="primary",
                              key="dli_btn",
@@ -888,10 +1021,8 @@ elif st.session_state['role'] == 'doctor':
                     if de and dp:
                         ok,user,msg = login_doctor(de, dp)
                         if ok:
-                            st.session_state[
-                                'doctor_logged_in'] = True
-                            st.session_state[
-                                'doctor_user'] = user
+                            st.session_state['doctor_logged_in'] = True
+                            st.session_state['doctor_user']      = user
                             st.rerun()
                         else:
                             st.error(msg)
@@ -907,21 +1038,18 @@ elif st.session_state['role'] == 'doctor':
                 st.write("")
                 c1,c2 = st.columns(2)
                 dn   = c1.text_input("Full name",   key="dn")
-                dsp  = c2.text_input(
-                    "Specialization",
-                    placeholder="Ophthalmologist", key="dsp"
-                )
+                dsp  = c2.text_input("Specialization",
+                                      placeholder="Ophthalmologist",
+                                      key="dsp")
                 c1,c2 = st.columns(2)
                 dh   = c1.text_input("Hospital",    key="dh")
                 dl   = c2.text_input("License No.", key="dl")
                 dme  = st.text_input("Email",       key="dme")
                 c1,c2 = st.columns(2)
-                dpa  = c1.text_input(
-                    "Password", type="password", key="dpa"
-                )
-                dpa2 = c2.text_input(
-                    "Confirm",  type="password", key="dpa2"
-                )
+                dpa  = c1.text_input("Password",
+                                      type="password", key="dpa")
+                dpa2 = c2.text_input("Confirm",
+                                      type="password", key="dpa2")
                 st.write("")
                 if st.button("Register →", type="primary",
                              key="dr_btn",
@@ -929,287 +1057,250 @@ elif st.session_state['role'] == 'doctor':
                     if not all([dn,dsp,dh,dl,dme,dpa]):
                         st.error("Please fill in all fields")
                     elif dpa != dpa2:
-                        st.error("Passwords do not match")
+                        st.error("Passwords don't match")
                     elif len(dpa) < 6:
                         st.error("Min 6 characters")
                     else:
                         ok,msg = register_doctor(
                             dn,dsp,dh,dl,dme,dpa)
                         if ok:
-                            st.success(
-                                "Registered! Sign in.")
+                            st.success("Registered! Sign in now.")
                         else:
                             st.error(msg)
     else:
         doc = st.session_state['doctor_user']
         doctor_navbar(doc)
 
-        st.markdown(
-            '<div class="page-title">Patient Cases</div>',
-            unsafe_allow_html=True
-        )
-        st.markdown(
-            '<div class="page-sub">AI-augmented retinal '
-            'screening cases awaiting your review</div>',
-            unsafe_allow_html=True
-        )
+        if st.session_state['doctor_page'] == 'messages':
+            st.markdown(
+                '<div class="page-title">Messages</div>',
+                unsafe_allow_html=True)
+            st.markdown(
+                '<div class="page-sub">All patient conversations</div>',
+                unsafe_allow_html=True)
+            all_cases = load_cases()
+            if not all_cases:
+                st.info("No cases yet.")
+            else:
+                for case in all_cases:
+                    msgs = load_messages(case['case_id'])
+                    with st.expander(
+                        f"💬 {case['case_id']} — "
+                        f"{case['patient_name']} "
+                        f"({len(msgs)} messages)"
+                    ):
+                        render_chat(case['case_id'], 'doctor',
+                                    doc['name'])
+            if st.button("← Back to Cases",
+                         use_container_width=True):
+                st.session_state['doctor_page'] = 'cases'
+                st.rerun()
 
-        cases = load_cases()
-
-        if not cases:
-            st.markdown("""
-            <div class="empty-state">
-                <div class="empty-icon">📋</div>
-                <div class="empty-title">No cases yet</div>
-                <div class="empty-sub">Cases will appear here
-                once patients submit screenings</div>
-            </div>
-            """, unsafe_allow_html=True)
         else:
-            total    = len(cases)
-            pending  = sum(1 for c in cases
-                           if c['status']=='Pending')
-            reviewed = sum(1 for c in cases
-                           if c['status']=='Reviewed')
-            high     = sum(1 for c in cases
-                           if 'High' in c['risk_level'])
+            st.markdown(
+                '<div class="page-title">Patient Cases</div>',
+                unsafe_allow_html=True)
+            st.markdown(
+                '<div class="page-sub">Review AI-assisted screenings '
+                'and send your diagnosis</div>',
+                unsafe_allow_html=True)
 
-            m1,m2,m3,m4 = st.columns(4)
-            m1.metric("Total Cases",    total)
-            m2.metric("Pending Review", pending)
-            m3.metric("Reviewed",       reviewed)
-            m4.metric("High Risk",      high)
-            st.write("")
+            cases = load_cases()
+            if not cases:
+                st.markdown("""
+                <div class="empty-state">
+                    <div class="empty-icon">📋</div>
+                    <div class="empty-title">No cases yet</div>
+                    <div class="empty-sub">Cases appear once
+                    patients complete screenings</div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                total    = len(cases)
+                pending  = sum(1 for c in cases if c['status']=='Pending')
+                reviewed = sum(1 for c in cases if c['status']=='Reviewed')
+                high     = sum(1 for c in cases
+                               if 'High' in c['risk_level']
+                               or 'specialist' in c['risk_level'])
 
-            fc1,fc2 = st.columns([2,4])
-            sf   = fc1.selectbox(
-                "Filter", ["All","Pending","Reviewed"]
-            )
-            srch = fc2.text_input(
-                "Search",
-                placeholder="Search patient name..."
-            )
-
-            filtered = cases
-            if sf != "All":
-                filtered = [c for c in filtered
-                            if c['status']==sf]
-            if srch:
-                filtered = [
-                    c for c in filtered
-                    if srch.lower() in
-                    c['patient_name'].lower()
-                ]
-            filtered = sorted(
-                filtered,
-                key=lambda c: (
-                    0 if c['status']=='Pending' else 1,
-                    0 if 'High' in c['risk_level'] else 1
-                )
-            )
-
-            st.write(f"Showing {len(filtered)} cases")
-            st.write("")
-
-            for case in filtered:
-                risk    = case['risk_level']
-                status  = case['status']
-                is_high = 'High' in risk
-                is_pend = status == 'Pending'
-                ri      = ("🔴" if is_high
-                           else "🟡" if is_pend else "🟢")
-                risk_type_str = (
-                    'High' if 'High' in risk
-                    else 'Moderate' if 'Moderate' in risk
-                    else 'Low'
-                )
-                risk_css = (
-                    "risk-high" if is_high
-                    else "risk-moderate"
-                    if "Moderate" in risk
-                    else "risk-low"
-                )
-                stat_html = (
-                    '<span class="status-pending">'
-                    'Pending</span>'
-                    if is_pend else
-                    '<span class="status-reviewed">'
-                    'Reviewed</span>'
-                )
-
-                with st.expander(
-                    f"{ri} {case['case_id']} — "
-                    f"{case['patient_name']} "
-                    f"({case['patient_age']}y) — "
-                    f"{status} — {case['timestamp']}",
-                    expanded=is_high and is_pend
-                ):
-                    c1,c2 = st.columns([1,1])
-
-                    with c1:
-                        st.markdown(f"""
-                        <div class="card doctor-card">
-                            <div class="section-label">
-                                Patient
-                            </div>
-                            <div style="font-size:18px;
-                                font-weight:800;
-                                font-family:'Nunito',sans-serif;
-                                color:#f0f4ff;
-                                margin-bottom:4px;">
-                                {case['patient_name']}
-                                {stat_html}
-                            </div>
-                            <div style="font-size:13px;
-                                color:#475569;
-                                margin-bottom:12px;">
-                                {case['patient_age']}y ·
-                                {case['patient_gender']} ·
-                                {case.get('patient_email','N/A')}
-                            </div>
-                            <div style="font-size:13px;
-                                color:#64748b;
-                                margin-bottom:4px;">
-                                Symptoms: {case['symptoms']}
-                            </div>
-                            <div style="font-size:13px;
-                                color:#64748b;">
-                                Quality: {case['quality_score']}%
-                                · {case['timestamp']}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                        st.markdown("**AI Predictions**")
-                        probs = case['probs']
-                        for i,(name,p) in enumerate(
-                            zip(DISEASE_NAMES,probs)
-                        ):
-                            if p > 0.3:
-                                bar = ("🔴" if p>0.7
-                                       else "🟡" if p>0.5
-                                       else "🔵")
-                                st.write(
-                                    f"{bar} {name}: "
-                                    f"{p*100:.1f}%"
-                                )
-                        st.markdown(f"""
-                        <div style="margin-top:12px;">
-                            <span class="risk-pill {risk_css}">
-                                {risk_type_str} Risk
-                            </span>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                    with c2:
-                        if os.path.exists(case['image_path']):
-                            ic1,ic2 = st.columns(2)
-                            ic1.image(
-                                Image.open(
-                                    case['image_path']),
-                                caption="Retinal scan",
-                                width='stretch'
-                            )
-                            if os.path.exists(
-                                case['heatmap_path']
-                            ):
-                                ic2.image(
-                                    Image.open(
-                                        case['heatmap_path']),
-                                    caption="AI heatmap",
-                                    width='stretch'
-                                )
-
-                        st.markdown("**Your Assessment**")
-
-                        already_reviewed = (
-                            status == "Reviewed" and
-                            not st.session_state.get(
-                                f"edit_{case['case_id']}",
-                                False)
-                        )
-
-                        if already_reviewed:
-                            st.success(
-                                f"Reviewed: "
-                                f"{case.get('reviewed_at','')}"
-                            )
-                            st.write(
-                                f"Diagnosis: "
-                                f"{case['doctor_diagnosis']}"
-                            )
-                            st.write(
-                                f"Treatment: "
-                                f"{case['doctor_prescription']}"
-                            )
-                            st.write(
-                                f"Referral: "
-                                f"{case['doctor_referral']}"
-                            )
-                            if case['doctor_notes']:
-                                st.write(
-                                    f"Notes: "
-                                    f"{case['doctor_notes']}"
-                                )
-                            if st.button(
-                                "Edit",
-                                key=f"edit_btn_"
-                                    f"{case['case_id']}"
-                            ):
-                                st.session_state[
-                                    f"edit_"
-                                    f"{case['case_id']}"
-                                ] = True
-                                st.rerun()
-                        else:
-                            diag = st.text_area(
-                                "Diagnosis",
-                                placeholder="e.g. Moderate "
-                                "Non-Proliferative DR",
-                                key=f"diag_{case['case_id']}"
-                            )
-                            pres = st.text_area(
-                                "Treatment Plan",
-                                placeholder="e.g. Lucentis "
-                                "0.5mg, follow up 4 weeks",
-                                key=f"pres_{case['case_id']}"
-                            )
-                            ref = st.selectbox(
-                                "Referral",
-                                ["No referral needed",
-                                 "Follow-up in 1 month",
-                                 "Follow-up in 3 months",
-                                 "Urgent — within 1 week",
-                                 "Emergency — immediate"],
-                                key=f"ref_{case['case_id']}"
-                            )
-                            notes = st.text_area(
-                                "Notes",
-                                placeholder="Additional "
-                                "observations",
-                                key=f"notes_{case['case_id']}"
-                            )
-                            st.write("")
-                            if st.button(
-                                "✅  Submit Review",
-                                type="primary",
-                                key=f"sub_{case['case_id']}",
-                                use_container_width=True
-                            ):
-                                if diag:
-                                    update_case(
-                                        case['case_id'],
-                                        diag,pres,ref,notes
-                                    )
-                                    st.success("Review saved!")
-                                    st.session_state[
-                                        f"edit_"
-                                        f"{case['case_id']}"
-                                    ] = False
-                                    st.rerun()
-                                else:
-                                    st.error(
-                                        "Please enter a "
-                                        "diagnosis"
-                                    )
+                m1,m2,m3,m4 = st.columns(4)
+                m1.metric("Total",    total)
+                m2.metric("Pending",  pending)
+                m3.metric("Reviewed", reviewed)
+                m4.metric("Urgent",   high)
                 st.write("")
+
+                fc1,fc2 = st.columns([2,4])
+                sf   = fc1.selectbox("Show",
+                                      ["All","Pending","Reviewed"])
+                srch = fc2.text_input("Search by name",
+                                       placeholder="Patient name...")
+
+                filtered = cases
+                if sf != "All":
+                    filtered = [c for c in filtered
+                                if c['status']==sf]
+                if srch:
+                    filtered = [c for c in filtered
+                                if srch.lower() in
+                                c['patient_name'].lower()]
+                filtered = sorted(
+                    filtered,
+                    key=lambda c: (
+                        0 if c['status']=='Pending' else 1,
+                        0 if ('High' in c['risk_level']
+                              or 'specialist' in c['risk_level'])
+                        else 1))
+
+                st.write(f"Showing {len(filtered)} cases")
+                st.write("")
+
+                for case in filtered:
+                    risk    = case['risk_level']
+                    status  = case['status']
+                    is_high = ('High' in risk
+                               or 'specialist' in risk)
+                    is_pend = status == 'Pending'
+                    ri      = ("🔴" if is_high
+                               else "🟡" if is_pend else "🟢")
+                    risk_type_str = (
+                        'High' if is_high
+                        else 'Moderate' if 'Moderate' in risk
+                             or 'follow' in risk.lower()
+                        else 'Low')
+                    risk_css = (
+                        "risk-high" if is_high
+                        else "risk-moderate"
+                        if 'Moderate' in risk
+                           or 'follow' in risk.lower()
+                        else "risk-low")
+                    stat_html = (
+                        '<span class="status-pending">Pending</span>'
+                        if is_pend else
+                        '<span class="status-reviewed">Reviewed</span>')
+
+                    with st.expander(
+                        f"{ri} {case['case_id']} — "
+                        f"{case['patient_name']} "
+                        f"({case['patient_age']}y) — "
+                        f"{status} — {case['timestamp']}",
+                        expanded=is_high and is_pend
+                    ):
+                        c1,c2 = st.columns([1,1])
+                        with c1:
+                            st.markdown(f"""
+                            <div class="doc-card">
+                                <div class="section-label">Patient</div>
+                                <div class="doc-name">
+                                    {case['patient_name']} {stat_html}
+                                </div>
+                                <div class="doc-meta">
+                                    {case['patient_age']}y ·
+                                    {case['patient_gender']} ·
+                                    {case.get('patient_email','N/A')}
+                                </div>
+                                <div style="margin-top:10px;font-size:13px;
+                                    color:#2d6a4f;">
+                                    <b>Symptoms:</b> {case['symptoms']}
+                                </div>
+                                <div style="margin-top:6px;font-size:13px;
+                                    color:#74c69d;">
+                                    Quality: {case['quality_score']}% ·
+                                    {case['timestamp']}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            st.write("")
+                            st.markdown("**AI Predictions**")
+                            probs = case['probs']
+                            for i,(name,p) in enumerate(
+                                zip(DISEASE_NAMES,probs)):
+                                if p > 0.3:
+                                    bar = ("🔴" if p>0.7
+                                           else "🟡" if p>0.5
+                                           else "🔵")
+                                    st.write(f"{bar} {name}: {p*100:.1f}%")
+                            st.markdown(f"""
+                            <div style="margin-top:12px;">
+                                <span class="risk-pill {risk_css}">
+                                    {risk_type_str} Risk</span>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with c2:
+                            if case.get('image_path') and os.path.exists(
+                                case['image_path']
+                            ):
+                                ic1,ic2 = st.columns(2)
+                                ic1.image(
+                                    Image.open(case['image_path']),
+                                    caption="Retinal scan",
+                                    width='stretch')
+                                if case.get('heatmap_path') and \
+                                   os.path.exists(case['heatmap_path']):
+                                    ic2.image(
+                                        Image.open(case['heatmap_path']),
+                                        caption="AI heatmap",
+                                        width='stretch')
+
+                            st.markdown("**Your Diagnosis**")
+                            already_reviewed = (
+                                status == "Reviewed" and
+                                not st.session_state.get(
+                                    f"edit_{case['case_id']}", False))
+
+                            if already_reviewed:
+                                st.success(
+                                    f"✅ Reviewed: "
+                                    f"{case.get('reviewed_at','')}")
+                                st.write(f"**Diagnosis:** {case['doctor_diagnosis']}")
+                                st.write(f"**Treatment:** {case['doctor_prescription']}")
+                                st.write(f"**Referral:** {case['doctor_referral']}")
+                                if case['doctor_notes']:
+                                    st.write(f"**Notes:** {case['doctor_notes']}")
+                                st.divider()
+                                render_chat(case['case_id'], 'doctor',
+                                            doc['name'])
+                                if st.button(
+                                    "Edit",
+                                    key=f"edit_btn_{case['case_id']}"):
+                                    st.session_state[
+                                        f"edit_{case['case_id']}"] = True
+                                    st.rerun()
+                            else:
+                                diag = st.text_area(
+                                    "Diagnosis",
+                                    placeholder="e.g. Moderate Non-Proliferative DR",
+                                    key=f"diag_{case['case_id']}")
+                                pres = st.text_area(
+                                    "Treatment Plan",
+                                    placeholder="e.g. Lucentis 0.5mg, follow up 4 weeks",
+                                    key=f"pres_{case['case_id']}")
+                                ref = st.selectbox(
+                                    "Referral Decision",
+                                    ["No referral needed",
+                                     "Follow-up in 1 month",
+                                     "Follow-up in 3 months",
+                                     "Urgent — visit within 1 week",
+                                     "Emergency — go immediately"],
+                                    key=f"ref_{case['case_id']}")
+                                notes = st.text_area(
+                                    "Additional Notes",
+                                    placeholder="Anything else to mention",
+                                    key=f"notes_{case['case_id']}")
+                                st.write("")
+                                if st.button(
+                                    "✅  Submit Diagnosis",
+                                    type="primary",
+                                    key=f"sub_{case['case_id']}",
+                                    use_container_width=True):
+                                    if diag:
+                                        update_case(case['case_id'],
+                                                    diag,pres,ref,notes)
+                                        st.success("Saved!")
+                                        st.session_state[
+                                            f"edit_{case['case_id']}"] = False
+                                        st.rerun()
+                                    else:
+                                        st.error("Please enter a diagnosis first")
+                        st.write("")
