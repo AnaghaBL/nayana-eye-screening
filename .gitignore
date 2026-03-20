@@ -1,0 +1,13 @@
+code .gitignore
+```
+
+**Step 2 — In the VS Code editor that opens, paste this:**
+```
+odir_model.pth
+retina_model.pth
+cases.json
+users.json
+cases_images/
+__pycache__/
+*.pyc
+.env
