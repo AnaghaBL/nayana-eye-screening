@@ -15,6 +15,42 @@ import numpy as np
 import io
 import os
 
+# ── Translation helper ─────────────────────────────────────────
+LANG_CODES = {
+    "Kannada": "kn", "Hindi": "hi",
+    "Tamil": "ta", "Telugu": "te", "English": "en"
+}
+
+def _translate(text, language):
+    if language == "English" or not text:
+        return text
+    try:
+        from deep_translator import GoogleTranslator
+        import signal
+
+        def _timeout_handler(signum, frame):
+            raise TimeoutError()
+
+        # Use threading-based timeout (works on Windows too)
+        import threading
+        result = [text]  # fallback
+
+        def do_translate():
+            try:
+                result[0] = GoogleTranslator(
+                    source='en',
+                    target=LANG_CODES.get(language, 'en')
+                ).translate(text)
+            except Exception:
+                pass  # keep fallback
+
+        t = threading.Thread(target=do_translate)
+        t.start()
+        t.join(timeout=5)  # 5 second max per translation
+        return result[0]
+    except Exception:
+        return text  # always fallback silently
+
 DISEASE_NAMES = [
     'Normal', 'Diabetic Retinopathy', 'Glaucoma',
     'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Other'
@@ -29,7 +65,8 @@ def generate_report(
     symptoms, quality_score, quality_tips,
     probs, detected_conditions, risk_level,
     original_image_pil, heatmap_array,
-    output_path="screening_report.pdf"
+    output_path="screening_report.pdf",
+    language="English"
 ):
     doc = SimpleDocTemplate(
         output_path,
@@ -38,14 +75,23 @@ def generate_report(
         topMargin=2*cm, bottomMargin=2*cm
     )
 
+    # PDF stays in English — Indic scripts don't render in ReportLab's
+    # default fonts and translation adds significant latency.
+    # Language is noted in the subtitle for reference.
+    lang_note      = f"  [{language}]" if language != "English" else ""
+    symptoms_t     = symptoms
+    risk_level_t   = risk_level
+    quality_tips_t = quality_tips
+    detected_t     = detected_conditions
+
     styles = getSampleStyleSheet()
 
     # ── Custom styles ──────────────────────────────────────────
     title_style = ParagraphStyle(
         'Title', parent=styles['Normal'],
-        fontSize=22, fontName='Helvetica-Bold',
+        fontSize=16, fontName='Helvetica-Bold',
         textColor=colors.HexColor('#1F4E79'),
-        alignment=TA_CENTER, spaceAfter=4
+        alignment=TA_CENTER, spaceAfter=2
     )
     subtitle_style = ParagraphStyle(
         'Subtitle', parent=styles['Normal'],
@@ -79,22 +125,27 @@ def generate_report(
     story.append(Paragraph("AI Tele-Ophthalmology", title_style))
     story.append(Paragraph("Retinal Screening Report", title_style))
     story.append(Spacer(1, 4))
-    story.append(Paragraph("Powered by EfficientNet-B0 trained on ODIR-5K — 8 Disease Screening", subtitle_style))
+    story.append(Paragraph(
+        f"Powered by EfficientNet-B0 trained on ODIR-5K — 8 Disease Screening{lang_note}",
+        subtitle_style
+    ))
     story.append(HRFlowable(width="100%", thickness=2,
                              color=colors.HexColor('#1F4E79'), spaceAfter=12))
 
     # ── Patient info table ─────────────────────────────────────
     story.append(Paragraph("Patient Information", section_style))
     now = datetime.now().strftime("%d %B %Y, %I:%M %p")
+    # Truncate symptoms if too long
+    symp_display = symptoms_t if len(symptoms_t) < 60 else symptoms_t[:57] + "..."
     patient_data = [
         ["Patient Name", patient_name,
          "Date & Time", now],
         ["Age", f"{patient_age} years",
          "Gender", patient_gender],
-        ["Reported Symptoms", symptoms,
-         "Image Quality", f"{quality_score}%"],
+        ["Image Quality", f"{quality_score}%",
+         "Reported Symptoms", symp_display],
     ]
-    patient_table = Table(patient_data, colWidths=[3.5*cm, 6*cm, 3.5*cm, 4*cm])
+    patient_table = Table(patient_data, colWidths=[3.5*cm, 5*cm, 3.5*cm, 5*cm])
     patient_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#EBF3FB')),
         ('BACKGROUND', (0,1), (-1,1), colors.HexColor('#F7FBFF')),
@@ -114,7 +165,7 @@ def generate_report(
     # ── Quality tips ───────────────────────────────────────────
     if quality_tips:
         story.append(Paragraph("Image Quality Notes", section_style))
-        for tip in quality_tips:
+        for tip in quality_tips_t:
             story.append(Paragraph(f"• {tip}", body_style))
         story.append(Spacer(1, 8))
 
@@ -185,7 +236,7 @@ def generate_report(
 
     if detected_conditions:
         cond_data = [["Condition", "Confidence", "Severity"]]
-        for name, prob in sorted(detected_conditions,
+        for name, prob in sorted(detected_t,
                                   key=lambda x: x[1], reverse=True):
             severity = "High Risk" if prob > 0.7 else "Moderate Risk"
             sev_color = colors.HexColor('#C00000') if prob > 0.7 \
@@ -204,7 +255,7 @@ def generate_report(
             ('ALIGN', (1,0), (-1,-1), 'CENTER'),
         ]
         for i, (name, prob) in enumerate(
-            sorted(detected_conditions, key=lambda x: x[1], reverse=True), 1
+            sorted(detected_t, key=lambda x: x[1], reverse=True), 1
         ):
             bg = colors.HexColor('#FFF0F0') if prob > 0.7 \
                  else colors.HexColor('#FFFBE6')
@@ -234,7 +285,7 @@ def generate_report(
         alignment=TA_CENTER, leading=18
     )
     risk_table = Table(
-        [[Paragraph(risk_level, risk_style)]],
+        [[Paragraph(risk_level_t, risk_style)]],
         colWidths=[17*cm]
     )
     risk_table.setStyle(TableStyle([

@@ -8,18 +8,12 @@ SYMPTOMS = {
     "Do you see flashes or floaters?": "internal",
     "Do you have difficulty seeing at night?": "internal",
 }
-
 def triage(answers):
-    """
-    answers: dict of {question: True/False}
-    Returns: 'front' or 'fundus'
-    """
     internal_flags = [
         "Do you have pain inside the eye?",
         "Do you see flashes or floaters?",
         "Do you have difficulty seeing at night?"
     ]
-    # If any internal symptoms → needs fundus
     for q in internal_flags:
         if answers.get(q, False):
             return 'fundus'
