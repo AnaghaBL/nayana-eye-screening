@@ -5,6 +5,9 @@ matplotlib.use('Agg')
 import numpy as np
 import os
 import io
+import time
+import tempfile
+import zipfile
 from PIL import Image
 from database import (
     get_patient_record, get_patient_visits,
@@ -14,7 +17,6 @@ from database import (
 )
 from constants import DISEASE_NAMES, DISEASE_COLORS
 import json
-import tempfile
 
 MESSAGES_FILE = "messages.json"
 
@@ -41,10 +43,10 @@ def doctor_can_access_patient(doctor_email, patient_email):
 def get_doctor_patients(doctor_email):
     """
     Returns list of unique patient emails that have booked
-    with this doctor. Used to scope the doctor's view.
+    with this doctor.
     """
     appointments = load_appointments()
-    seen = set()
+    seen     = set()
     patients = []
     for a in appointments:
         if (a['doctor_email'] == doctor_email and
@@ -58,8 +60,8 @@ def generate_progression_summary(patient_email):
     visits = get_patient_visits(patient_email)
     if len(visits) < 2:
         return "Not enough visits to compare yet."
-    last  = visits[-1]
-    prev  = visits[-2]
+    last = visits[-1]
+    prev = visits[-2]
 
     def risk_score(r):
         r = r.lower()
@@ -73,13 +75,14 @@ def generate_progression_summary(patient_email):
     if last_score < prev_score:
         trend = "Your eye health has improved since your last visit."
     elif last_score > prev_score:
-        trend = "Your eye health needs attention — risk has increased since your last visit."
+        trend = ("Your eye health needs attention — risk has "
+                 "increased since your last visit.")
     else:
         trend = "Your eye health is stable compared to your last visit."
 
     last_probs = last.get("probs", [])
     prev_probs = prev.get("probs", [])
-    changes = []
+    changes    = []
     for i, name in enumerate(DISEASE_NAMES):
         if i == 0 or i >= len(last_probs) or i >= len(prev_probs):
             continue
@@ -109,7 +112,8 @@ def risk_trend_chart(patient_email, dark_mode=False):
     fig.patch.set_facecolor(bg)
     ax.set_facecolor(bg)
     clrs = {1:'#2d9e6b', 2:'#f4a261', 3:'#e63946'}
-    ax.plot(dates, scores, color='#b7e4c7', linewidth=2, zorder=1)
+    ax.plot(dates, scores, color='#b7e4c7',
+            linewidth=2, zorder=1)
     ax.scatter(dates, scores,
                c=[clrs[s] for s in scores], s=80, zorder=2)
     ax.set_yticks([1,2,3])
@@ -193,8 +197,7 @@ def render_patient_health_record(user):
                 <div style="font-size:11px;color:#64748b;
                             text-transform:uppercase;
                             letter-spacing:1px;">
-                    Total Screenings
-                </div>
+                    Total Screenings</div>
                 <div style="font-size:22px;font-weight:700;
                             color:#818cf8;">{len(visits)}</div>
             </div>
@@ -202,19 +205,16 @@ def render_patient_health_record(user):
                 <div style="font-size:11px;color:#64748b;
                             text-transform:uppercase;
                             letter-spacing:1px;">
-                    Last Screening
-                </div>
+                    Last Screening</div>
                 <div style="font-size:14px;font-weight:600;">
                     {visits[-1]['timestamp'][:11]
-                     if visits else 'None'}
-                </div>
+                     if visits else 'None'}</div>
             </div>
             <div>
                 <div style="font-size:11px;color:#64748b;
                             text-transform:uppercase;
                             letter-spacing:1px;">
-                    Blood Group
-                </div>
+                    Blood Group</div>
                 <div style="font-size:14px;font-weight:600;">
                     {profile.get('blood_group') or 'Not set'}
                 </div>
@@ -223,44 +223,100 @@ def render_patient_health_record(user):
                 <div style="font-size:11px;color:#64748b;
                             text-transform:uppercase;
                             letter-spacing:1px;">
-                    Known Conditions
-                </div>
+                    Known Conditions</div>
                 <div style="font-size:14px;font-weight:600;">
                     {', '.join(profile.get('known_conditions',[]))
-                     or 'None recorded'}
-                </div>
+                     or 'None recorded'}</div>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Download full history PDF ──────────────────────────────
+    # ── Download all reports as ZIP ────────────────────────────
     if visits:
-        if st.button("Download Full History as PDF",
+        if st.button("Download All Reports as ZIP",
                      use_container_width=True,
-                     key="dl_full_history"):
-            with st.spinner("Generating your complete health file..."):
-                from report_generator import generate_full_history_pdf
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix='.pdf'
-                ) as tmp:
-                    pdf_path = generate_full_history_pdf(
-                        patient_email=patient_email,
-                        profile=profile,
-                        visits=visits,
-                        output_path=tmp.name,
-                        include_doctor_notes=False
-                    )
-                with open(pdf_path, 'rb') as f:
-                    st.download_button(
-                        "Download PDF",
-                        data=f.read(),
-                        file_name=f"nayana_health_file_"
-                                  f"{profile['name'].replace(' ','_')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True,
-                        key="dl_full_history_btn"
-                    )
+                     key="dl_all_zip"):
+            with st.spinner(
+                "Generating all reports..."
+            ):
+                from report_generator import generate_report
+                zip_buf = io.BytesIO()
+                with zipfile.ZipFile(zip_buf, 'w') as zf:
+                    for v in visits:
+                        try:
+                            case_probs = np.array(
+                                v.get('probs', [0]*8))
+                            case_det   = v.get(
+                                'detected_conditions', [])
+                            msgs       = load_messages(
+                                v['case_id'])
+                            with tempfile.NamedTemporaryFile(
+                                delete=False, suffix='.pdf'
+                            ) as tmp:
+                                pdf_path = generate_report(
+                                    patient_name=v['patient_name'],
+                                    patient_age=v['patient_age'],
+                                    patient_gender=v['patient_gender'],
+                                    patient_email=patient_email,
+                                    symptoms=v['symptoms'],
+                                    quality_score=v['quality_score'],
+                                    quality_tips=[],
+                                    probs=case_probs,
+                                    detected_conditions=case_det,
+                                    risk_level=v['risk_level'],
+                                    risk_type=(
+                                        'high'
+                                        if 'High' in v['risk_level']
+                                        or 'specialist' in v['risk_level']
+                                        else 'moderate'
+                                        if 'Moderate' in v['risk_level']
+                                        else 'low'
+                                    ),
+                                    original_image_pil=Image.open(
+                                        v['image_path'])
+                                        if v.get('image_path') and
+                                        os.path.exists(v['image_path'])
+                                        else None,
+                                    heatmap_array=np.array(
+                                        Image.open(v['heatmap_path']))
+                                        if v.get('heatmap_path') and
+                                        os.path.exists(v['heatmap_path'])
+                                        else None,
+                                    doctor_diagnosis=v.get(
+                                        'doctor_diagnosis'),
+                                    doctor_prescription=v.get(
+                                        'doctor_prescription'),
+                                    doctor_referral=v.get(
+                                        'doctor_referral'),
+                                    doctor_notes=v.get(
+                                        'doctor_notes'),
+                                    reviewed_at=v.get('reviewed_at'),
+                                    chat_messages=msgs,
+                                    visit_history=visits,
+                                    output_path=tmp.name
+                                )
+                            zf.write(
+                                pdf_path,
+                                f"nayana_{v['case_id']}.pdf")
+                        except Exception as e:
+                            st.warning(
+                                f"Could not generate report "
+                                f"for {v['case_id']}: {e}")
+                zip_buf.seek(0)
+                st.session_state['zip_data'] = zip_buf.read()
+
+        if st.session_state.get('zip_data'):
+            st.download_button(
+                "Download ZIP",
+                data=st.session_state['zip_data'],
+                file_name=f"nayana_all_reports_"
+                          f"{profile['name'].replace(' ','_')}"
+                          f".zip",
+                mime="application/zip",
+                use_container_width=True,
+                key="dl_zip_btn"
+            )
 
     st.write("")
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -274,7 +330,8 @@ def render_patient_health_record(user):
     # ── TAB 1: Overview ────────────────────────────────────────
     with tab1:
         if len(visits) >= 2:
-            summary = generate_progression_summary(patient_email)
+            summary = generate_progression_summary(
+                patient_email)
             st.markdown(f"""
             <div style="background:rgba(45,158,107,0.1);
                         border:1px solid rgba(45,158,107,0.3);
@@ -284,17 +341,16 @@ def render_patient_health_record(user):
                             letter-spacing:2px;
                             text-transform:uppercase;
                             color:#2d9e6b;margin-bottom:6px;">
-                    Progression Summary
-                </div>
+                    Progression Summary</div>
                 <div style="font-size:14px;line-height:1.6;">
-                    {summary}
-                </div>
+                    {summary}</div>
             </div>
             """, unsafe_allow_html=True)
 
-        st.markdown('<div class="section-label">'
-                    'Risk Timeline</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-label">'
+            'Risk Timeline</div>',
+            unsafe_allow_html=True)
         if visits:
             for v in reversed(visits):
                 risk  = v['risk_level'].lower()
@@ -304,7 +360,7 @@ def render_patient_health_record(user):
                     color, label = "#f4a261", "Moderate"
                 else:
                     color, label = "#2d9e6b", "Low Risk"
-                det = v.get("detected_conditions", [])
+                det      = v.get("detected_conditions", [])
                 top_cond = ""
                 if det:
                     top = max(det, key=lambda x: x[1])
@@ -321,15 +377,12 @@ def render_patient_health_record(user):
                                 flex-shrink:0;"></div>
                     <div style="font-size:13px;color:#64748b;
                                 min-width:120px;">
-                        {v['timestamp'][:11]}
-                    </div>
+                        {v['timestamp'][:11]}</div>
                     <div style="font-size:13px;font-weight:600;
                                 color:{color};min-width:90px;">
-                        {label}
-                    </div>
+                        {label}</div>
                     <div style="font-size:13px;color:#94a3b8;">
-                        {v['status']} {top_cond}
-                    </div>
+                        {v['status']}{top_cond}</div>
                 </div>
                 """, unsafe_allow_html=True)
         else:
@@ -342,20 +395,23 @@ def render_patient_health_record(user):
         else:
             for v in reversed(visits):
                 risk  = v['risk_level'].lower()
-                badge = ("High Risk" if "high" in risk
-                         or "specialist" in risk
-                         else "Moderate" if "moderate" in risk
-                         or "follow" in risk else "Low Risk")
+                badge = (
+                    "High Risk" if "high" in risk
+                    or "specialist" in risk
+                    else "Moderate" if "moderate" in risk
+                    or "follow" in risk
+                    else "Low Risk"
+                )
                 with st.expander(
                     f"{v['timestamp']} — {badge} "
                     f"— {v['status']}",
                     expanded=False
                 ):
-                    st.write(f"**Symptoms:** {v['symptoms']}")
+                    st.write(
+                        f"**Symptoms:** {v['symptoms']}")
                     st.write(
                         f"**Image Quality:** "
-                        f"{v['quality_score']}%"
-                    )
+                        f"{v['quality_score']}%")
                     c1,c2 = st.columns(2)
                     with c1:
                         if (v.get('image_path') and
@@ -363,15 +419,14 @@ def render_patient_health_record(user):
                             st.image(
                                 Image.open(v['image_path']),
                                 caption="Retinal scan",
-                                use_container_width=True
-                            )
+                                width='stretch')
                         if (v.get('heatmap_path') and
-                                os.path.exists(v['heatmap_path'])):
+                                os.path.exists(
+                                    v['heatmap_path'])):
                             st.image(
                                 Image.open(v['heatmap_path']),
                                 caption="AI heatmap",
-                                use_container_width=True
-                            )
+                                width='stretch')
                     with c2:
                         st.markdown("**AI Findings:**")
                         probs = v.get("probs", [])
@@ -380,38 +435,38 @@ def render_patient_health_record(user):
                         ):
                             if p > 0.3:
                                 pc1,pc2 = st.columns([3,1])
-                                pc1.progress(float(p), text=name)
+                                pc1.progress(
+                                    float(p), text=name)
                                 if p>0.7:
-                                    pc2.error(f"{p*100:.0f}%")
+                                    pc2.error(
+                                        f"{p*100:.0f}%")
                                 elif p>0.5:
-                                    pc2.warning(f"{p*100:.0f}%")
+                                    pc2.warning(
+                                        f"{p*100:.0f}%")
                                 else:
-                                    pc2.info(f"{p*100:.0f}%")
+                                    pc2.info(
+                                        f"{p*100:.0f}%")
 
                     if v['status'] == 'Reviewed':
                         st.divider()
-                        st.markdown("**Doctor's Assessment:**")
+                        st.markdown(
+                            "**Doctor's Assessment:**")
                         st.write(
                             f"**Diagnosis:** "
-                            f"{v['doctor_diagnosis']}"
-                        )
+                            f"{v['doctor_diagnosis']}")
                         st.write(
                             f"**Treatment:** "
-                            f"{v['doctor_prescription'] or 'None'}"
-                        )
+                            f"{v['doctor_prescription'] or 'None'}")
                         st.write(
                             f"**Referral:** "
-                            f"{v['doctor_referral']}"
-                        )
+                            f"{v['doctor_referral']}")
                         if v['doctor_notes']:
                             st.write(
                                 f"**Notes:** "
-                                f"{v['doctor_notes']}"
-                            )
+                                f"{v['doctor_notes']}")
                         st.write(
                             f"**Reviewed:** "
-                            f"{v.get('reviewed_at','')}"
-                        )
+                            f"{v.get('reviewed_at','')}")
                     else:
                         st.info("Awaiting doctor review.")
 
@@ -424,12 +479,14 @@ def render_patient_health_record(user):
                             use_container_width=True
                         ):
                             with st.spinner("Generating..."):
-                                from report_generator import generate_report
+                                from report_generator import \
+                                    generate_report
                                 case_probs = np.array(
                                     v.get('probs', [0]*8))
-                                case_det = v.get(
+                                case_det   = v.get(
                                     'detected_conditions', [])
-                                msgs = load_messages(v['case_id'])
+                                msgs       = load_messages(
+                                    v['case_id'])
                                 with tempfile.NamedTemporaryFile(
                                     delete=False, suffix='.pdf'
                                 ) as tmp:
@@ -445,12 +502,15 @@ def render_patient_health_record(user):
                                         detected_conditions=case_det,
                                         risk_level=v['risk_level'],
                                         risk_type=(
-                                            'high' if 'High' in v['risk_level']
+                                            'high'
+                                            if 'High' in v['risk_level']
                                             or 'specialist' in v['risk_level']
-                                            else 'moderate' if 'Moderate' in v['risk_level']
+                                            else 'moderate'
+                                            if 'Moderate' in v['risk_level']
                                             else 'low'
                                         ),
-                                        original_image_pil=Image.open(v['image_path'])
+                                        original_image_pil=Image.open(
+                                            v['image_path'])
                                             if v.get('image_path') and
                                             os.path.exists(v['image_path'])
                                             else None,
@@ -459,26 +519,35 @@ def render_patient_health_record(user):
                                             if v.get('heatmap_path') and
                                             os.path.exists(v['heatmap_path'])
                                             else None,
-                                        doctor_name=v.get('doctor_diagnosis','')[:30]
-                                            if v.get('doctor_diagnosis') else None,
-                                        doctor_diagnosis=v.get('doctor_diagnosis'),
-                                        doctor_prescription=v.get('doctor_prescription'),
-                                        doctor_referral=v.get('doctor_referral'),
-                                        doctor_notes=v.get('doctor_notes'),
-                                        reviewed_at=v.get('reviewed_at'),
+                                        doctor_name=v.get(
+                                            'doctor_diagnosis','')[:30]
+                                            if v.get('doctor_diagnosis')
+                                            else None,
+                                        doctor_diagnosis=v.get(
+                                            'doctor_diagnosis'),
+                                        doctor_prescription=v.get(
+                                            'doctor_prescription'),
+                                        doctor_referral=v.get(
+                                            'doctor_referral'),
+                                        doctor_notes=v.get(
+                                            'doctor_notes'),
+                                        reviewed_at=v.get(
+                                            'reviewed_at'),
                                         chat_messages=msgs,
                                         visit_history=get_patient_visits(
                                             patient_email),
                                         output_path=tmp.name
                                     )
                                 with open(pdf_path, 'rb') as f:
-                                    st.session_state[pdf_key] = f.read()
+                                    st.session_state[
+                                        pdf_key] = f.read()
                                 st.rerun()
                     else:
                         st.download_button(
                             "Download Report",
                             data=st.session_state[pdf_key],
-                            file_name=f"nayana_{v['case_id']}.pdf",
+                            file_name=f"nayana_"
+                                      f"{v['case_id']}.pdf",
                             mime="application/pdf",
                             use_container_width=True,
                             key=f"pdf_visit_{v['case_id']}"
@@ -486,7 +555,8 @@ def render_patient_health_record(user):
 
     # ── TAB 3: Prescriptions ───────────────────────────────────
     with tab3:
-        reviewed = [v for v in visits if v['status']=='Reviewed'
+        reviewed = [v for v in visits
+                    if v['status']=='Reviewed'
                     and v.get('doctor_prescription')]
         if not reviewed:
             st.info("No prescriptions yet.")
@@ -494,8 +564,7 @@ def render_patient_health_record(user):
             st.markdown(
                 '<div class="section-label">'
                 'All Prescriptions</div>',
-                unsafe_allow_html=True
-            )
+                unsafe_allow_html=True)
             for v in reversed(reviewed):
                 st.markdown(f"""
                 <div style="border-left:3px solid #818cf8;
@@ -504,20 +573,16 @@ def render_patient_health_record(user):
                             background:rgba(99,102,241,0.05);
                             border-radius:0 8px 8px 0;">
                     <div style="font-size:12px;color:#64748b;">
-                        {v.get('reviewed_at','')[:11]}
-                    </div>
+                        {v.get('reviewed_at','')[:11]}</div>
                     <div style="font-size:15px;font-weight:600;
                                 margin-top:4px;">
-                        {v['doctor_prescription']}
-                    </div>
+                        {v['doctor_prescription']}</div>
                     <div style="font-size:13px;color:#94a3b8;
                                 margin-top:4px;">
-                        For: {v['doctor_diagnosis']}
-                    </div>
+                        For: {v['doctor_diagnosis']}</div>
                     <div style="font-size:12px;color:#64748b;
                                 margin-top:2px;">
-                        Referral: {v['doctor_referral']}
-                    </div>
+                        Referral: {v['doctor_referral']}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -529,8 +594,7 @@ def render_patient_health_record(user):
             st.markdown(
                 '<div class="section-label">'
                 'Risk Level Over Time</div>',
-                unsafe_allow_html=True
-            )
+                unsafe_allow_html=True)
             fig1 = risk_trend_chart(patient_email, dark)
             if fig1:
                 st.pyplot(fig1)
@@ -539,8 +603,7 @@ def render_patient_health_record(user):
             st.markdown(
                 '<div class="section-label">'
                 'Disease Confidence Over Time</div>',
-                unsafe_allow_html=True
-            )
+                unsafe_allow_html=True)
             fig2 = disease_trend_chart(patient_email, dark)
             if fig2:
                 st.pyplot(fig2)
@@ -549,18 +612,20 @@ def render_patient_health_record(user):
             st.markdown(
                 '<div class="section-label">'
                 'Visit Comparison</div>',
-                unsafe_allow_html=True
-            )
+                unsafe_allow_html=True)
             rows = []
             for v in visits:
                 det = v.get("detected_conditions", [])
                 top = (max(det, key=lambda x: x[1])
                        if det else ("Normal", 0))
-                risk = v['risk_level'].lower()
-                level = ("High" if "high" in risk
-                         or "specialist" in risk
-                         else "Moderate" if "moderate" in risk
-                         or "follow" in risk else "Low")
+                risk  = v['risk_level'].lower()
+                level = (
+                    "High" if "high" in risk
+                    or "specialist" in risk
+                    else "Moderate" if "moderate" in risk
+                    or "follow" in risk
+                    else "Low"
+                )
                 rows.append({
                     "Date":        v['timestamp'][:11],
                     "Risk":        level,
@@ -580,8 +645,7 @@ def render_patient_health_record(user):
         st.markdown("**Update your medical profile**")
         st.caption(
             "This helps your doctor provide better care. "
-            "Only your doctor can see this."
-        )
+            "Only your doctor can see this.")
         c1,c2 = st.columns(2)
         blood_opts = ["Not set","A+","A-","B+","B-",
                       "AB+","AB-","O+","O-"]
@@ -594,12 +658,14 @@ def render_patient_health_record(user):
         )
         known = c2.text_input(
             "Known Conditions",
-            value=", ".join(profile.get("known_conditions",[])),
+            value=", ".join(
+                profile.get("known_conditions",[])),
             placeholder="e.g. Diabetes, Hypertension"
         )
         family = st.text_input(
             "Family History",
-            value=", ".join(profile.get("family_history",[])),
+            value=", ".join(
+                profile.get("family_history",[])),
             placeholder="e.g. Glaucoma, Diabetic Retinopathy"
         )
         meds = st.text_input(
@@ -615,9 +681,10 @@ def render_patient_health_record(user):
         )
         if st.button("Save Profile", type="primary"):
             update_patient_profile(patient_email, {
-                "blood_group": (blood_group
-                                if blood_group != "Not set"
-                                else ""),
+                "blood_group": (
+                    blood_group
+                    if blood_group != "Not set" else ""
+                ),
                 "known_conditions": [
                     x.strip() for x in known.split(",")
                     if x.strip()
@@ -639,7 +706,8 @@ def render_patient_health_record(user):
 
 
 # ── Doctor view ────────────────────────────────────────────────
-def render_doctor_patient_history(patient_email, doctor_name,
+def render_doctor_patient_history(patient_email,
+                                   doctor_name,
                                    doctor_email):
     """
     Renders the full patient file for a doctor.
@@ -647,11 +715,11 @@ def render_doctor_patient_history(patient_email, doctor_name,
     Doctor's private notes are shown here — patients never see these.
     """
     # ── Privacy check ──────────────────────────────────────────
-    if not doctor_can_access_patient(doctor_email, patient_email):
+    if not doctor_can_access_patient(doctor_email,
+                                      patient_email):
         st.error(
             "Access denied. You can only view records of "
-            "patients who have booked an appointment with you."
-        )
+            "patients who have booked an appointment with you.")
         return
 
     record = get_patient_record(patient_email)
@@ -671,8 +739,7 @@ def render_doctor_patient_history(patient_email, doctor_name,
                 border-radius:12px;padding:16px 20px;
                 margin-bottom:16px;">
         <div style="font-size:16px;font-weight:700;">
-            {profile['name']} — Full Medical History
-        </div>
+            {profile['name']} — Full Medical History</div>
         <div style="font-size:13px;color:#64748b;margin-top:4px;">
             {profile['age']}y · {profile['gender']} ·
             {len(visits)} visits ·
@@ -700,19 +767,24 @@ def render_doctor_patient_history(patient_email, doctor_name,
             det = v.get("detected_conditions", [])
             top = (max(det, key=lambda x: x[1])
                    if det else ("Normal", 0))
-            risk = v['risk_level'].lower()
-            level = ("High" if "high" in risk
-                     or "specialist" in risk
-                     else "Moderate" if "moderate" in risk
-                     or "follow" in risk else "Low")
+            risk  = v['risk_level'].lower()
+            level = (
+                "High" if "high" in risk
+                or "specialist" in risk
+                else "Moderate" if "moderate" in risk
+                or "follow" in risk
+                else "Low"
+            )
             rows.append({
                 "Date":        v['timestamp'][:11],
                 "Risk":        level,
                 "Top Finding": top[0],
                 "Confidence":  f"{top[1]*100:.0f}%",
-                "Diagnosis":   (v.get('doctor_diagnosis','Pending')[:30]
-                                if v.get('doctor_diagnosis')
-                                else 'Pending')
+                "Diagnosis":   (
+                    v.get('doctor_diagnosis','Pending')[:30]
+                    if v.get('doctor_diagnosis')
+                    else 'Pending'
+                )
             })
         import pandas as pd
         st.dataframe(
@@ -723,7 +795,8 @@ def render_doctor_patient_history(patient_email, doctor_name,
 
         st.write("")
         st.markdown("**Previous Diagnoses**")
-        reviewed = [v for v in visits if v['status']=='Reviewed']
+        reviewed = [v for v in visits
+                    if v['status'] == 'Reviewed']
         if not reviewed:
             st.info("No reviewed cases yet.")
         for v in reversed(reviewed):
@@ -733,18 +806,15 @@ def render_doctor_patient_history(patient_email, doctor_name,
                         background:rgba(99,102,241,0.05);
                         border-radius:0 8px 8px 0;">
                 <div style="font-size:12px;color:#64748b;">
-                    {v.get('reviewed_at','')}
-                </div>
+                    {v.get('reviewed_at','')}</div>
                 <div style="font-size:14px;font-weight:600;
                             margin-top:2px;">
-                    {v['doctor_diagnosis']}
-                </div>
+                    {v['doctor_diagnosis']}</div>
                 <div style="font-size:13px;color:#94a3b8;">
-                    Treatment: {v['doctor_prescription'] or 'None'}
-                </div>
+                    Treatment:
+                    {v['doctor_prescription'] or 'None'}</div>
                 <div style="font-size:13px;color:#94a3b8;">
-                    Referral: {v['doctor_referral']}
-                </div>
+                    Referral: {v['doctor_referral']}</div>
                 {f"<div style='font-size:12px;color:#64748b;margin-top:4px;'>{v['doctor_notes']}</div>" if v['doctor_notes'] else ""}
             </div>
             """, unsafe_allow_html=True)
@@ -765,12 +835,10 @@ def render_doctor_patient_history(patient_email, doctor_name,
                             background:rgba(45,158,107,0.05);
                             border-radius:0 8px 8px 0;">
                     <div style="font-size:12px;color:#64748b;">
-                        {v.get('reviewed_at','')[:11]}
-                    </div>
+                        {v.get('reviewed_at','')[:11]}</div>
                     <div style="font-size:15px;font-weight:600;
                                 margin-top:4px;">
-                        {v['doctor_prescription']}
-                    </div>
+                        {v['doctor_prescription']}</div>
                     <div style="font-size:13px;color:#94a3b8;
                                 margin-top:2px;">
                         Diagnosis: {v['doctor_diagnosis']}
@@ -795,9 +863,8 @@ def render_doctor_patient_history(patient_email, doctor_name,
     # ── TAB 4: Private Notes (doctor only) ─────────────────────
     with tab4:
         st.caption(
-            "These notes are private and visible "
-            "to doctors only. Patients cannot see this tab."
-        )
+            "These notes are private and visible to doctors "
+            "only. Patients cannot see this tab.")
         notes = record.get("continuity_notes", [])
         if notes:
             for n in reversed(notes):
@@ -808,95 +875,27 @@ def render_doctor_patient_history(patient_email, doctor_name,
                             background:rgba(244,162,97,0.06);
                             border-radius:0 8px 8px 0;">
                     <div style="font-size:12px;color:#64748b;">
-                        {n['doctor_name']} · {n['date']}
-                    </div>
+                        {n['doctor_name']} · {n['date']}</div>
                     <div style="font-size:14px;margin-top:4px;">
-                        {n['note']}
-                    </div>
+                        {n['note']}</div>
                 </div>
                 """, unsafe_allow_html=True)
         else:
             st.caption("No notes yet.")
 
         st.write("")
-        new_note = st.text_area(
+        unique_key = f"{patient_email}_{id(patient_email)}"
+        new_note   = st.text_area(
             "Add a private note",
             placeholder="e.g. Patient has family history of DR. "
                         "Monitor annually even if results normal.",
-            key=f"cont_note_{patient_email}_{id(patient_email)}"
+            key=f"cont_note_{unique_key}"
         )
         if st.button("Save Note", type="primary",
-                     key=f"save_note_{patient_email}_{id(patient_email)}"):
+                     key=f"save_note_{unique_key}"):
             if new_note.strip():
                 add_continuity_note(
-                    patient_email,if st.button("Download Full History as PDF",
-             width='stretch',
-             key="dl_full_history"):
-    with st.spinner("Generating your complete health file..."):
-        from report_generator import generate_report
-        import zipfile
-        zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, 'w') as zf:
-            for v in visits:
-                try:
-                    case_probs = np.array(v.get('probs',[0]*8))
-                    case_det   = v.get('detected_conditions',[])
-                    msgs       = load_messages(v['case_id'])
-                    with tempfile.NamedTemporaryFile(
-                        delete=False, suffix='.pdf'
-                    ) as tmp:
-                        pdf_path = generate_report(
-                            patient_name=v['patient_name'],
-                            patient_age=v['patient_age'],
-                            patient_gender=v['patient_gender'],
-                            patient_email=patient_email,
-                            symptoms=v['symptoms'],
-                            quality_score=v['quality_score'],
-                            quality_tips=[],
-                            probs=case_probs,
-                            detected_conditions=case_det,
-                            risk_level=v['risk_level'],
-                            risk_type=(
-                                'high' if 'High' in v['risk_level']
-                                or 'specialist' in v['risk_level']
-                                else 'moderate' if 'Moderate' in v['risk_level']
-                                else 'low'
-                            ),
-                            original_image_pil=Image.open(
-                                v['image_path'])
-                                if v.get('image_path') and
-                                os.path.exists(v['image_path'])
-                                else None,
-                            heatmap_array=np.array(
-                                Image.open(v['heatmap_path']))
-                                if v.get('heatmap_path') and
-                                os.path.exists(v['heatmap_path'])
-                                else None,
-                            doctor_diagnosis=v.get('doctor_diagnosis'),
-                            doctor_prescription=v.get('doctor_prescription'),
-                            doctor_referral=v.get('doctor_referral'),
-                            doctor_notes=v.get('doctor_notes'),
-                            reviewed_at=v.get('reviewed_at'),
-                            chat_messages=msgs,
-                            visit_history=visits,
-                            output_path=tmp.name
-                        )
-                    zf.write(pdf_path,
-                             f"nayana_{v['case_id']}.pdf")
-                except Exception as e:
-                    st.warning(
-                        f"Could not generate report for "
-                        f"{v['case_id']}: {e}")
-        zip_buf.seek(0)
-    st.download_button(
-        "Download ZIP",
-        data=zip_buf.read(),
-        file_name=f"nayana_all_reports_"
-                  f"{profile['name'].replace(' ','_')}.zip",
-        mime="application/zip",
-        width='stretch',
-        key="dl_zip_btn"
-    )
+                    patient_email,
                     f"Dr. {doctor_name}",
                     new_note.strip()
                 )
