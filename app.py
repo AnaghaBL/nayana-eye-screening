@@ -16,11 +16,152 @@ from database import load_cases, save_case, update_case
 from auth import (register_patient, login_patient,
                   register_doctor, login_doctor)
 from styles import load_css
+import json
+from datetime import datetime
+
+MESSAGES_FILE = "messages.json"
+
+def load_all_messages():
+    if not os.path.exists(MESSAGES_FILE):
+        return {}
+    with open(MESSAGES_FILE, "r") as f:
+        return json.load(f)
+
+def save_all_messages(data):
+    with open(MESSAGES_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+def load_messages(case_id):
+    data = load_all_messages()
+    return data.get(case_id, [])
+
+def send_message(case_id, sender_name, sender_role, text):
+    data = load_all_messages()
+    if case_id not in data:
+        data[case_id] = []
+    data[case_id].append({
+        "sender_name": sender_name,
+        "sender_role": sender_role,
+        "text": text,
+        "timestamp": datetime.now().strftime("%d %b %Y, %I:%M %p")
+    })
+    save_all_messages(data)
+
+def render_chat(case_id, current_role, current_name):
+    messages = load_messages(case_id)
+    st.markdown("""
+    <div style="font-family:'Space Grotesk',sans-serif;font-size:11px;
+                font-weight:700;letter-spacing:2px;
+                text-transform:uppercase;color:#818cf8;
+                margin-bottom:12px;">
+        Messages
+    </div>
+    """, unsafe_allow_html=True)
+    if not messages:
+        st.caption("No messages yet — start the conversation below.")
+    else:
+        for msg in messages:
+            is_me = msg['sender_role'] == current_role
+            align = "flex-end" if is_me else "flex-start"
+            bg    = "rgba(99,102,241,0.15)" if is_me else "rgba(255,255,255,0.06)"
+            border= "rgba(99,102,241,0.4)" if is_me else "rgba(255,255,255,0.12)"
+            name_color = "#a5b4fc" if is_me else "#94a3b8"
+            text_color = "#e2e8f0"
+            st.markdown(f"""
+            <div style="display:flex;justify-content:{align};margin-bottom:10px;">
+                <div style="max-width:75%;background:{bg};
+                            border:1px solid {border};
+                            border-radius:16px;padding:12px 16px;">
+                    <div style="font-size:11px;font-weight:700;
+                                color:{name_color};margin-bottom:4px;">
+                        {msg['sender_name']} ·
+                        <span style="font-weight:400;color:#64748b;">
+                            {msg['timestamp']}
+                        </span>
+                    </div>
+                    <div style="font-size:14px;color:{text_color};line-height:1.5;">
+                        {msg['text']}
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    key = f"chat_input_{case_id}_{current_role}"
+    msg_text = st.text_input(
+        "Type a message",
+        placeholder="Write something...",
+        key=key,
+        label_visibility="collapsed"
+    )
+    if st.button("Send", key=f"send_{case_id}_{current_role}", type="primary"):
+        if msg_text.strip():
+            send_message(case_id, current_name, current_role, msg_text.strip())
+            st.rerun()
+        else:
+            st.warning("Please type a message first")
+
+EYE_CLASSES = ['Cataracts', 'Conjunctivitis', 'Crossed_Eyes',
+               'Eyelid_Conditions', 'Normal', 'Uveitis']
+
+@st.cache_resource
+def load_eye_model():
+    from torchvision import models as tv_models
+    m = tv_models.efficientnet_b0(weights=None)
+    m.classifier[1] = torch.nn.Linear(m.classifier[1].in_features, 6)
+    m.load_state_dict(torch.load('eye_model_camera_best.pth',
+                                  map_location='cpu',
+                                  weights_only=False))
+    m.eval()
+    return m
+
+def analyze_front_eye(image_pil):
+    tf = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406],
+                             [0.229, 0.224, 0.225])
+    ])
+    img_tensor = tf(image_pil.convert('RGB')).unsqueeze(0)
+    with torch.no_grad():
+        probs = torch.softmax(
+            load_eye_model()(img_tensor), dim=1
+        )[0].numpy()
+    display_map = {
+        'Cataracts': 'Cataract',
+        'Conjunctivitis': 'Redness / Conjunctivitis',
+        'Crossed_Eyes': 'Crossed Eyes',
+        'Eyelid_Conditions': 'Eyelid Condition',
+        'Normal': 'Normal',
+        'Uveitis': 'Uveitis'
+    }
+    results = {}
+    for cls, prob in zip(EYE_CLASSES, probs):
+        display = display_map.get(cls, cls)
+        results[display] = float(prob)
+    return results
+
+def get_front_eye_recommendations(results):
+    recommendations = []
+    high_risk = []
+    for condition, score in results.items():
+        if score > 0.6:
+            high_risk.append(condition)
+        if score > 0.4:
+            if condition == 'Redness / Conjunctivitis':
+                recommendations.append("Possible conjunctivitis — avoid touching eyes, consult a doctor if persists beyond 2 days")
+            elif condition == 'Cataract':
+                recommendations.append("Possible cataract — schedule a detailed eye examination with an ophthalmologist")
+            elif condition == 'Uveitis':
+                recommendations.append("Possible uveitis — this needs urgent attention, see a doctor immediately")
+            elif condition == 'Eyelid Condition':
+                recommendations.append("Eyelid condition detected — could be a stye or infection, consult a doctor")
+            elif condition == 'Crossed Eyes':
+                recommendations.append("Eye misalignment detected — consult an ophthalmologist")
+    needs_fundus = any(results.get(c, 0) > 0.5 for c in ['Cataract', 'Uveitis'])
+    return recommendations, high_risk, needs_fundus
 from disease_info import DISEASE_INFO
-from front_eye_analyzer import (analyze_front_eye,
-                                 get_front_eye_recommendations)
+
 from symptom_check import SYMPTOMS, triage
-from chat import render_chat, load_messages
+
 import tempfile
 import os
 
