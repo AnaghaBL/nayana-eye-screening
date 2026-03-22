@@ -132,7 +132,7 @@ def get_patient_visits(patient_email):
     return sorted(visits, key=lambda c: c["timestamp"])
 
 def get_disease_trend(patient_email, disease_name):
-    from app import DISEASE_NAMES
+    from constants import DISEASE_NAMES          # ← change this line
     visits  = get_patient_visits(patient_email)
     if disease_name not in DISEASE_NAMES:
         return []

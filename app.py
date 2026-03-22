@@ -206,6 +206,7 @@ def get_front_eye_recommendations(results):
 
 from disease_info import DISEASE_INFO
 from symptom_check import SYMPTOMS, triage
+from patient_records import render_patient_health_record, render_doctor_patient_history
 
 st.set_page_config(
     page_title="Nayana — AI Eye Screening",
@@ -219,14 +220,7 @@ if 'dark_mode' not in st.session_state:
 
 st.markdown(load_css(st.session_state['dark_mode']), unsafe_allow_html=True)
 
-DISEASE_NAMES = [
-    'Normal', 'Diabetic Retinopathy', 'Glaucoma',
-    'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Other'
-]
-DISEASE_COLORS = [
-    '#2d9e6b','#e63946','#f4a261','#457b9d',
-    '#9b5de5','#f77f00','#00b4d8','#74c69d'
-]
+from constants import DISEASE_NAMES, DISEASE_COLORS
 
 for key, val in {
     'role': None,
@@ -1445,4 +1439,13 @@ elif st.session_state['role'] == 'doctor':
                                         st.rerun()
                                     else:
                                         st.error("Please enter a diagnosis first")
-                        st.write("")
+                        st.divider()
+        with st.expander(
+            f"View Full History — {case['patient_name']}",
+            expanded=False
+        ):
+            render_doctor_patient_history(
+                case.get('patient_email', ''),
+                doc['name']s
+            )
+st.write("")

@@ -15,10 +15,7 @@ import numpy as np
 import io
 import os
  
-DISEASE_NAMES = [
-    'Normal', 'Diabetic Retinopathy', 'Glaucoma',
-    'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Other'
-]
+from constants import DISEASE_NAMES
 DISEASE_COLORS_HEX = [
     '#2d9e6b','#e63946','#f4a261','#457b9d',
     '#9b5de5','#f77f00','#00b4d8','#74c69d'

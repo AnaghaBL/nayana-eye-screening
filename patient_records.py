@@ -4,6 +4,7 @@ import matplotlib
 matplotlib.use('Agg')
 import numpy as np
 import os
+import io
 from PIL import Image
 from database import (
     get_patient_record, get_patient_visits,
@@ -20,14 +21,7 @@ def load_messages(case_id):
     with open(MESSAGES_FILE, "r") as f:
         data = json.load(f)
     return data.get(case_id, [])
-DISEASE_NAMES = [
-    'Normal', 'Diabetic Retinopathy', 'Glaucoma',
-    'Cataract', 'AMD', 'Hypertension', 'Myopia', 'Other'
-]
-DISEASE_COLORS = [
-    '#2d9e6b','#e63946','#f4a261','#457b9d',
-    '#9b5de5','#f77f00','#00b4d8','#74c69d'
-]
+from constants import DISEASE_NAMES, DISEASE_COLORS
 
 def generate_progression_summary(patient_email):
     visits = get_patient_visits(patient_email)
