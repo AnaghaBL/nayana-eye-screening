@@ -1,0 +1,15 @@
+[
+  {
+    "appointment_id": "APPT-0001",
+    "patient_email": "khushi@khushi.com",
+    "patient_name": "khushu",
+    "doctor_email": "anagha@anagha.com",
+    "doctor_name": "anagha",
+    "date": "2026-03-22",
+    "time_slot": "09:00 AM",
+    "status": "Completed",
+    "case_id": "CASE-0006",
+    "notes": "",
+    "created_at": "22 Mar 2026, 12:55 PM"
+  }
+]

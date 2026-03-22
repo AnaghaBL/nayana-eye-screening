@@ -64,3 +64,6 @@ def login_doctor(email, password):
     if user["password"] != hash_password(password):
         return False, None, "Incorrect password"
     return True, user, "Login successful"
+def get_all_doctors():
+    users = load_users()
+    return list(users["doctors"].values())

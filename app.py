@@ -14,10 +14,50 @@ from report_generator import generate_report
 from voice_input import record_voice
 from database import load_cases, save_case, update_case
 from auth import (register_patient, login_patient,
-                  register_doctor, login_doctor)
+                  register_doctor, login_doctor, get_all_doctors)
 from styles import load_css
 import json
 from datetime import datetime
+# ── Appointments ──────────────────────────────────────────────
+APPOINTMENTS_FILE = "appointments.json"
+
+def load_appointments():
+    if not os.path.exists(APPOINTMENTS_FILE):
+        return []
+    with open(APPOINTMENTS_FILE, 'r') as f:
+        return json.load(f)
+
+def save_appointments(appointments):
+    with open(APPOINTMENTS_FILE, 'w') as f:
+        json.dump(appointments, f, indent=2)
+
+def book_appointment(patient_email, patient_name, doctor_email,
+                     doctor_name, date, time_slot, case_id, notes):
+    appointments = load_appointments()
+    appt_id = f"APPT-{len(appointments)+1:04d}"
+    appointments.append({
+        "appointment_id": appt_id,
+        "patient_email":  patient_email,
+        "patient_name":   patient_name,
+        "doctor_email":   doctor_email,
+        "doctor_name":    doctor_name,
+        "date":           date,
+        "time_slot":      time_slot,
+        "status":         "Pending",
+        "case_id":        case_id,
+        "notes":          notes,
+        "created_at":     datetime.now().strftime("%d %b %Y, %I:%M %p")
+    })
+    save_appointments(appointments)
+    return appt_id
+
+def update_appointment_status(appt_id, status):
+    appointments = load_appointments()
+    for a in appointments:
+        if a['appointment_id'] == appt_id:
+            a['status'] = status
+            break
+    save_appointments(appointments)
 
 MESSAGES_FILE = "messages.json"
 
@@ -331,8 +371,6 @@ def step_bar(current_step):
             html += f'<div class="step-line {lc2}"></div>'
     html += '</div>'
     st.markdown(html, unsafe_allow_html=True)
-
-# ── Navbars ────────────────────────────────────────────────────
 def patient_navbar(user):
     st.markdown(f"""
     <div class="topnav">
@@ -356,16 +394,16 @@ def patient_navbar(user):
         st.rerun()
     if c4.button("Sign Out",
                  use_container_width=True, key="nav_so"):
-        st.session_state['patient_logged_in'] = False
-        st.session_state['patient_user']      = None
-        st.session_state['role']              = None
+        keys_to_clear = [k for k in st.session_state.keys()
+                        if k not in ['dark_mode']]
+        for k in keys_to_clear:
+            del st.session_state[k]
         st.rerun()
     dark_label = "☀" if st.session_state['dark_mode'] else "●"
     if c5.button(dark_label, use_container_width=True, key="nav_theme"):
         st.session_state['dark_mode'] = not st.session_state['dark_mode']
         st.rerun()
     st.write("")
-
 def doctor_navbar(doc):
     st.markdown(f"""
     <div class="topnav">
@@ -373,29 +411,37 @@ def doctor_navbar(doc):
         <div class="topnav-user">Dr. {doc['name']}</div>
     </div>
     """, unsafe_allow_html=True)
-    c1,c2,c3,c4,c5 = st.columns([2,1.2,1.2,1.2,0.6])
+    c1,c2,c3,c4,c5,c6 = st.columns([2,1,1,1,1,0.6])
     if c2.button("Cases",
                  type=("primary" if st.session_state['doctor_page']=='cases'
                        else "secondary"),
                  use_container_width=True, key="dnav_cases"):
         st.session_state['doctor_page'] = 'cases'
         st.rerun()
-    if c3.button("Messages",
+    if c3.button("📅 Appointments",
+                 type=("primary" if st.session_state['doctor_page']=='appointments'
+                       else "secondary"),
+                 use_container_width=True, key="dnav_appt"):
+        st.session_state['doctor_page'] = 'appointments'
+        st.rerun()
+    if c4.button("💬 Messages",
+                 type=("primary" if st.session_state['doctor_page']=='messages'
+                       else "secondary"),
                  use_container_width=True, key="dnav_msg"):
         st.session_state['doctor_page'] = 'messages'
         st.rerun()
-    if c4.button("Sign Out",
+    if c5.button("Sign Out",
                  use_container_width=True, key="dnav_so"):
-        st.session_state['doctor_logged_in'] = False
-        st.session_state['doctor_user']      = None
-        st.session_state['role']             = None
+        keys_to_clear = [k for k in st.session_state.keys()
+                        if k not in ['dark_mode']]
+        for k in keys_to_clear:
+            del st.session_state[k]
         st.rerun()
     dark_label = "☀" if st.session_state['dark_mode'] else "●"
-    if c5.button(dark_label, use_container_width=True, key="dnav_theme"):
+    if c6.button(dark_label, use_container_width=True, key="dnav_theme"):
         st.session_state['dark_mode'] = not st.session_state['dark_mode']
         st.rerun()
     st.write("")
-
 # ── Results renderer ───────────────────────────────────────────
 def render_my_results(my_cases):
     if not my_cases:
@@ -936,33 +982,91 @@ elif st.session_state['role'] == 'patient':
                 ac1,ac2 = st.columns(2)
 
                 with ac1:
-                    if st.button("Send to a Doctor", type="primary", use_container_width=True):
-                        with st.spinner("Sending your case..."):
-                            os.makedirs("cases_images", exist_ok=True)
-                            n = len(os.listdir("cases_images"))
-                            ip, hp, fp = "", "", ""
-                            if fundus_pil and heatmap is not None:
-                                ip = f"cases_images/{pname.replace(' ','_')}_{n}_original.png"
-                                hp = f"cases_images/{pname.replace(' ','_')}_{n}_heatmap.png"
-                                fundus_pil.resize((300,300)).save(ip)
-                                Image.fromarray(heatmap).save(hp)
-                            if front_pil:
-                                fp = f"cases_images/{pname.replace(' ','_')}_{n}_front.png"
-                                front_pil.resize((300,300)).save(fp)
-                            fe_str = ""
-                            if fe_results:
-                                fe_str = " | Front-eye: " + " | ".join(
-                                    f"{c}: {s*100:.0f}%" for c,s in sorted(fe_results.items(), key=lambda x: x[1], reverse=True))
-                            cid = save_case(
-                                patient_name=pname, patient_age=int(page_),
-                                patient_gender=pgender, symptoms=symp_final + fe_str,
-                                quality_score=score,
-                                probs=probs if probs is not None else np.zeros(8),
-                                detected_conditions=det_conds, risk_level=risk_txt,
-                                image_path=ip, heatmap_path=hp, patient_email=user['email'])
-                        st.success(f"Sent! Case ID: **{cid}**")
-                        st.session_state['last_case_id'] = cid
+                    st.markdown("### Book an Appointment")
+                    doctors = get_all_doctors()
+                    if not doctors:
+                        st.warning("No doctors registered yet — check back soon.")
+                    else:
+                        doctor_options = {
+                            f"Dr. {d['name']} — {d['specialization']} ({d['hospital']})": d
+                            for d in doctors
+                        }
+                        selected_doc_label = st.selectbox(
+                            "Choose a doctor",
+                            list(doctor_options.keys()),
+                            key="appt_doc"
+                        )
+                        selected_doc = doctor_options[selected_doc_label]
 
+                        import datetime as dt
+                        today = dt.date.today()
+                        appt_date = st.date_input(
+                            "Select date",
+                            min_value=today,
+                            max_value=today + dt.timedelta(days=30),
+                            key="appt_date"
+                        )
+
+                        time_slots = [
+                            "09:00 AM", "09:30 AM", "10:00 AM", "10:30 AM",
+                            "11:00 AM", "11:30 AM", "12:00 PM", "02:00 PM",
+                            "02:30 PM", "03:00 PM", "03:30 PM", "04:00 PM",
+                            "04:30 PM", "05:00 PM"
+                        ]
+                        time_slot = st.selectbox(
+                            "Select time slot",
+                            time_slots,
+                            key="appt_time"
+                        )
+
+                        appt_notes = st.text_area(
+                            "Notes for doctor (optional)",
+                            placeholder="Mention any specific concerns...",
+                            key="appt_notes"
+                        )
+
+                        if st.button("Book Appointment & Send Case",
+                                     type="primary",
+                                     use_container_width=True,
+                                     key="book_appt"):
+                            with st.spinner("Booking appointment..."):
+                                os.makedirs("cases_images", exist_ok=True)
+                                n = len(os.listdir("cases_images"))
+                                ip, hp = "", ""
+                                if fundus_pil and heatmap is not None:
+                                    ip = f"cases_images/{pname.replace(' ','_')}_{n}_original.png"
+                                    hp = f"cases_images/{pname.replace(' ','_')}_{n}_heatmap.png"
+                                    fundus_pil.resize((300,300)).save(ip)
+                                    Image.fromarray(heatmap).save(hp)
+                                if front_pil:
+                                    fp = f"cases_images/{pname.replace(' ','_')}_{n}_front.png"
+                                    front_pil.resize((300,300)).save(fp)
+                                fe_str = ""
+                                if fe_results:
+                                    fe_str = " | Front-eye: " + " | ".join(
+                                        f"{c}: {s*100:.0f}%" for c,s in sorted(fe_results.items(), key=lambda x: x[1], reverse=True))
+                                cid = save_case(
+                                    patient_name=pname, patient_age=int(page_),
+                                    patient_gender=pgender,
+                                    symptoms=symp_final + fe_str,
+                                    quality_score=score,
+                                    probs=probs if probs is not None else np.zeros(8),
+                                    detected_conditions=det_conds,
+                                    risk_level=risk_txt,
+                                    image_path=ip, heatmap_path=hp,
+                                    patient_email=user['email'])
+                                appt_id = book_appointment(
+                                    patient_email=user['email'],
+                                    patient_name=pname,
+                                    doctor_email=selected_doc['email'],
+                                    doctor_name=selected_doc['name'],
+                                    date=str(appt_date),
+                                    time_slot=time_slot,
+                                    case_id=cid,
+                                    notes=appt_notes
+                                )
+                            st.success(f"✅ Appointment booked! ID: **{appt_id}** with Dr. {selected_doc['name']} on {appt_date} at {time_slot}")
+                            st.session_state['last_case_id'] = cid
                 with ac2:
                     if fundus_pil and probs is not None:
                         if st.button("Download Report", use_container_width=True):
@@ -1070,10 +1174,58 @@ elif st.session_state['role'] == 'doctor':
         doc = st.session_state['doctor_user']
         doctor_navbar(doc)
 
-        if st.session_state['doctor_page'] == 'messages':
+        if st.session_state['doctor_page'] == 'appointments':
+            st.markdown('<div class="page-title">Appointments</div>', unsafe_allow_html=True)
+            st.markdown('<div class="page-sub">Upcoming and past appointments</div>', unsafe_allow_html=True)
+
+            all_appts = [a for a in load_appointments() if a['doctor_email'] == doc['email']]
+
+            if not all_appts:
+                st.info("No appointments booked yet.")
+            else:
+                pending_a   = [a for a in all_appts if a['status'] == 'Pending']
+                confirmed_a = [a for a in all_appts if a['status'] == 'Confirmed']
+                completed_a = [a for a in all_appts if a['status'] == 'Completed']
+                cancelled_a = [a for a in all_appts if a['status'] == 'Cancelled']
+
+                m1,m2,m3,m4 = st.columns(4)
+                m1.metric("Pending",   len(pending_a))
+                m2.metric("Confirmed", len(confirmed_a))
+                m3.metric("Completed", len(completed_a))
+                m4.metric("Cancelled", len(cancelled_a))
+                st.write("")
+
+                for appt in sorted(all_appts, key=lambda a: (a['date'], a['time_slot'])):
+                    status = appt['status']
+                    icon = ("⏳" if status=="Pending" else "✅" if status=="Confirmed"
+                            else "🏁" if status=="Completed" else "❌")
+                    with st.expander(f"{icon} {appt['appointment_id']} — {appt['patient_name']} — {appt['date']} {appt['time_slot']} — {status}"):
+                        st.write(f"**Patient:** {appt['patient_name']} ({appt['patient_email']})")
+                        st.write(f"**Date:** {appt['date']} at {appt['time_slot']}")
+                        st.write(f"**Case ID:** {appt['case_id']}")
+                        if appt['notes']:
+                            st.write(f"**Notes:** {appt['notes']}")
+                        st.write("")
+                        if status == 'Pending':
+                            col1,col2 = st.columns(2)
+                            if col1.button("✅ Confirm", key=f"conf_{appt['appointment_id']}", use_container_width=True, type="primary"):
+                                update_appointment_status(appt['appointment_id'], 'Confirmed')
+                                st.rerun()
+                            if col2.button("❌ Cancel", key=f"canc_{appt['appointment_id']}", use_container_width=True):
+                                update_appointment_status(appt['appointment_id'], 'Cancelled')
+                                st.rerun()
+                        elif status == 'Confirmed':
+                            if st.button("🏁 Mark Completed", key=f"comp_{appt['appointment_id']}", use_container_width=True, type="primary"):
+                                update_appointment_status(appt['appointment_id'], 'Completed')
+                                st.rerun()
+
+        elif st.session_state['doctor_page'] == 'messages':
             st.markdown('<div class="page-title">Messages</div>', unsafe_allow_html=True)
             st.markdown('<div class="page-sub">All patient conversations</div>', unsafe_allow_html=True)
-            all_cases = load_cases()
+            all_cases = [c for c in load_cases() if any(
+                a['doctor_email'] == doc['email'] and a['case_id'] == c['case_id']
+                for a in load_appointments()
+            )]
             if not all_cases:
                 st.info("No cases yet.")
             else:
@@ -1081,14 +1233,10 @@ elif st.session_state['role'] == 'doctor':
                     msgs = load_messages(case['case_id'])
                     with st.expander(f"{case['case_id']} — {case['patient_name']} ({len(msgs)} messages)"):
                         render_chat(case['case_id'], 'doctor', doc['name'])
-            if st.button("Back to Cases", use_container_width=True):
-                st.session_state['doctor_page'] = 'cases'
-                st.rerun()
 
-        else:
+        elif st.session_state['doctor_page'] == 'cases':
             st.markdown('<div class="page-title">Patient Cases</div>', unsafe_allow_html=True)
             st.markdown('<div class="page-sub">Review AI-assisted screenings and send your diagnosis</div>', unsafe_allow_html=True)
-
             cases = load_cases()
             if not cases:
                 st.markdown("""
