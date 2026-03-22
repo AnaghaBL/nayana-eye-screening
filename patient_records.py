@@ -823,10 +823,10 @@ def render_doctor_patient_history(patient_email, doctor_name,
             "Add a private note",
             placeholder="e.g. Patient has family history of DR. "
                         "Monitor annually even if results normal.",
-            key=f"cont_note_{patient_email}"
+            key=f"cont_note_{patient_email}_{id(patient_email)}"
         )
         if st.button("Save Note", type="primary",
-                     key=f"save_note_{patient_email}"):
+                     key=f"save_note_{patient_email}_{id(patient_email)}"):
             if new_note.strip():
                 add_continuity_note(
                     patient_email,
