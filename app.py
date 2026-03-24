@@ -28,6 +28,7 @@ from datetime import datetime
 import tempfile
 import os
 import hashlib
+from encryption import encrypt_data, decrypt_data
 
 # ── Appointments ───────────────────────────────────────────────
 APPOINTMENTS_FILE = "appointments.json"
@@ -79,8 +80,9 @@ def book_appointment(patient_email, patient_name, doctor_email,
         "notes":          notes,
         "created_at":     datetime.now().strftime("%d %b %Y, %I:%M %p")
     })
-    with open(APPOINTMENTS_FILE, 'w') as f:
-        json.dump(appointments, f, indent=2)
+    encrypted = encrypt_data(json.dumps(appointments, indent=2))
+    with open(APPOINTMENTS_FILE, 'wb') as f:
+        f.write(encrypted)
     return appt_id, None
 
 def update_appointment_status(appt_id, status):
@@ -95,20 +97,27 @@ def update_appointment_status(appt_id, status):
                 code = hashlib.md5(appt_id.encode()).hexdigest()[:10]
                 a['meet_link'] = f"https://meet.jit.si/nayana-{appt_id.lower()}"
             break
-    with open(APPOINTMENTS_FILE, 'w') as f:
-        json.dump(appointments, f, indent=2)
+    encrypted = encrypt_data(json.dumps(appointments, indent=2))
+    with open(APPOINTMENTS_FILE, 'wb') as f:
+        f.write(encrypted)
 # ── Chat ───────────────────────────────────────────────────────
 MESSAGES_FILE = "messages.json"
 
 def load_all_messages():
     if not os.path.exists(MESSAGES_FILE):
         return {}
-    with open(MESSAGES_FILE, "r") as f:
-        return json.load(f)
+    with open(MESSAGES_FILE, 'rb') as f:
+        raw = f.read()
+    try:
+        return json.loads(decrypt_data(raw))
+    except:
+        with open(MESSAGES_FILE, 'r') as f:
+            return json.load(f)
 
 def save_all_messages(data):
-    with open(MESSAGES_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    encrypted = encrypt_data(json.dumps(data, indent=2))
+    with open(MESSAGES_FILE, 'wb') as f:
+        f.write(encrypted)
 
 def load_messages(case_id):
     data = load_all_messages()

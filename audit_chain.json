@@ -1,0 +1,12 @@
+[
+  {
+    "index": 0,
+    "timestamp": "2026-03-24T14:35:23.884668",
+    "action": "CASE_CREATED",
+    "case_id": "CASE-0001",
+    "actor": "khushi@khushi.com",
+    "details": "",
+    "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "hash": "0e787f101b6f42878fb46d9be23fa9e07e2bb10eb58f2f18d851fd589139075f"
+  }
+]

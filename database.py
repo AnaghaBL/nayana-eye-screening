@@ -1,6 +1,8 @@
 import json
 import os
 from datetime import datetime
+from encryption import encrypt_data, decrypt_data
+from blockchain import add_block
 
 DB_FILE      = "cases.json"
 RECORDS_FILE = "patient_records.json"
@@ -9,8 +11,14 @@ RECORDS_FILE = "patient_records.json"
 def load_cases():
     if not os.path.exists(DB_FILE):
         return []
-    with open(DB_FILE, 'r') as f:
-        return json.load(f)
+    with open(DB_FILE, 'rb') as f:
+        raw = f.read()
+    try:
+        return json.loads(decrypt_data(raw))
+    except:
+        # fallback for unencrypted existing file
+        with open(DB_FILE, 'r') as f:
+            return json.load(f)
 
 def save_case(
     patient_name, patient_age, patient_gender,
@@ -43,12 +51,14 @@ def save_case(
         "reviewed_at":         ""
     }
     cases.append(case)
-    with open(DB_FILE, 'w') as f:
-        json.dump(cases, f, indent=2)
-
-    # Auto-update patient record
+    encrypted = encrypt_data(json.dumps(cases, indent=2))
+    with open(DB_FILE, 'wb') as f:
+        f.write(encrypted)
+    add_block("CASE_CREATED", case_id, patient_email)
     _register_visit(patient_email, patient_name, patient_age, patient_gender, case_id)
     return case_id
+
+    
 
 def update_case(case_id, diagnosis, prescription, referral, notes):
     cases = load_cases()
@@ -61,19 +71,28 @@ def update_case(case_id, diagnosis, prescription, referral, notes):
             case["status"]              = "Reviewed"
             case["reviewed_at"]         = datetime.now().strftime("%d %b %Y, %I:%M %p")
             break
-    with open(DB_FILE, 'w') as f:
-        json.dump(cases, f, indent=2)
+    encrypted = encrypt_data(json.dumps(cases, indent=2))
+    with open(DB_FILE, 'wb') as f:
+        f.write(encrypted)
+    add_block("CASE_REVIEWED", case_id, "doctor")
+    
 
 # ── Patient Records ────────────────────────────────────────────
 def _load_records():
     if not os.path.exists(RECORDS_FILE):
         return {}
-    with open(RECORDS_FILE, 'r') as f:
-        return json.load(f)
+    with open(RECORDS_FILE, 'rb') as f:
+        raw = f.read()
+    try:
+        return json.loads(decrypt_data(raw))
+    except:
+        with open(RECORDS_FILE, 'r') as f:
+            return json.load(f)
 
 def _save_records(records):
-    with open(RECORDS_FILE, 'w') as f:
-        json.dump(records, f, indent=2)
+    encrypted = encrypt_data(json.dumps(records, indent=2))
+    with open(RECORDS_FILE, 'wb') as f:
+        f.write(encrypted)
 
 def _register_visit(patient_email, name, age, gender, case_id):
     if not patient_email:
@@ -159,5 +178,10 @@ def load_appointments():
     APPOINTMENTS_FILE = "appointments.json"
     if not os.path.exists(APPOINTMENTS_FILE):
         return []
-    with open(APPOINTMENTS_FILE, 'r') as f:
-        return json.load(f)
+    with open(APPOINTMENTS_FILE, 'rb') as f:
+        raw = f.read()
+    try:
+        return json.loads(decrypt_data(raw))
+    except:
+        with open(APPOINTMENTS_FILE, 'r') as f:
+            return json.load(f)

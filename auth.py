@@ -2,6 +2,7 @@ import json
 import os
 import hashlib
 import re
+from encryption import encrypt_data, decrypt_data
 
 USERS_FILE    = "users.json"
 DOCS_DIR      = "doctor_docs"
@@ -34,12 +35,18 @@ def hash_password(password):
 def load_users():
     if not os.path.exists(USERS_FILE):
         return {"patients": {}, "doctors": {}}
-    with open(USERS_FILE, 'r') as f:
-        return json.load(f)
+    with open(USERS_FILE, 'rb') as f:
+        raw = f.read()
+    try:
+        return json.loads(decrypt_data(raw))
+    except:
+        with open(USERS_FILE, 'r') as f:
+            return json.load(f)
 
 def save_users(users):
-    with open(USERS_FILE, 'w') as f:
-        json.dump(users, f, indent=2)
+    encrypted = encrypt_data(json.dumps(users, indent=2))
+    with open(USERS_FILE, 'wb') as f:
+        f.write(encrypted)
 
 def register_patient(name, age, gender, email, password):
     users = load_users()
