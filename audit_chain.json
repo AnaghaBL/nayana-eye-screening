@@ -8,5 +8,25 @@
     "details": "",
     "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
     "hash": "0e787f101b6f42878fb46d9be23fa9e07e2bb10eb58f2f18d851fd589139075f"
+  },
+  {
+    "index": 1,
+    "timestamp": "2026-03-24T19:22:10.407024",
+    "action": "CASE_CREATED",
+    "case_id": "CASE-0002",
+    "actor": "khushi@khushi.com",
+    "details": "",
+    "prev_hash": "0e787f101b6f42878fb46d9be23fa9e07e2bb10eb58f2f18d851fd589139075f",
+    "hash": "6ef1b27c72b335e9e6287cd512a7e13cbc17ee41c2ea5dc7c26e11026bb1dcae"
+  },
+  {
+    "index": 2,
+    "timestamp": "2026-03-24T19:22:27.353490",
+    "action": "CASE_CREATED",
+    "case_id": "CASE-0003",
+    "actor": "khushi@khushi.com",
+    "details": "",
+    "prev_hash": "6ef1b27c72b335e9e6287cd512a7e13cbc17ee41c2ea5dc7c26e11026bb1dcae",
+    "hash": "1bc1244487a7f26e552451fd123cfc58065f2ecbb525554cdf450b31bf66b078"
   }
 ]

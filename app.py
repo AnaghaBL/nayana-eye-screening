@@ -12,7 +12,7 @@ from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 from report_generator import generate_report
 from voice_input import record_voice
-from database import load_cases, save_case, update_case, load_appointments
+from database import load_cases, save_case, update_case, load_appointments, get_patient_visits
 from auth import (register_patient, login_patient,
                   register_doctor, login_doctor, get_all_doctors,
                   login_admin, get_pending_doctors,
@@ -88,8 +88,13 @@ def book_appointment(patient_email, patient_name, doctor_email,
 def update_appointment_status(appt_id, status):
     if not os.path.exists(APPOINTMENTS_FILE):
         return
-    with open(APPOINTMENTS_FILE, 'r') as f:
-        appointments = json.load(f)
+    with open(APPOINTMENTS_FILE, 'rb') as f:
+        raw = f.read()
+    try:
+        appointments = json.loads(decrypt_data(raw))
+    except:
+        with open(APPOINTMENTS_FILE, 'r') as f:
+            appointments = json.load(f)
     for a in appointments:
         if a['appointment_id'] == appt_id:
             a['status'] = status
