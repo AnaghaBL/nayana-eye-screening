@@ -20,10 +20,11 @@
     "doctor_name": "anagha",
     "date": "2026-03-22",
     "time_slot": "09:00 AM",
-    "status": "Pending",
+    "status": "Confirmed",
     "case_id": "CASE-0007",
     "notes": "jmkk",
-    "created_at": "22 Mar 2026, 01:38 PM"
+    "created_at": "22 Mar 2026, 01:38 PM",
+    "meet_link": "https://meet.google.com/af9-5292-3e4"
   },
   {
     "appointment_id": "APPT-0003",
@@ -33,10 +34,11 @@
     "doctor_name": "anagha",
     "date": "2026-03-22",
     "time_slot": "09:00 AM",
-    "status": "Pending",
+    "status": "Confirmed",
     "case_id": "CASE-0008",
     "notes": "",
-    "created_at": "22 Mar 2026, 02:23 PM"
+    "created_at": "22 Mar 2026, 02:23 PM",
+    "meet_link": "https://meet.google.com/1f0-98b4-652"
   },
   {
     "appointment_id": "APPT-0004",
@@ -46,7 +48,7 @@
     "doctor_name": "anagha",
     "date": "2026-03-22",
     "time_slot": "09:00 AM",
-    "status": "Confirmed",
+    "status": "Completed",
     "case_id": "CASE-0009",
     "notes": "",
     "created_at": "22 Mar 2026, 02:55 PM"
@@ -59,10 +61,11 @@
     "doctor_name": "anagha",
     "date": "2026-03-22",
     "time_slot": "09:00 AM",
-    "status": "Pending",
+    "status": "Confirmed",
     "case_id": "CASE-0010",
     "notes": "",
-    "created_at": "22 Mar 2026, 03:23 PM"
+    "created_at": "22 Mar 2026, 03:23 PM",
+    "meet_link": "https://meet.jit.si/nayana-appt-0005"
   },
   {
     "appointment_id": "APPT-0006",
@@ -89,5 +92,45 @@
     "case_id": "CASE-0017",
     "notes": "",
     "created_at": "22 Mar 2026, 09:24 PM"
+  },
+  {
+    "appointment_id": "APPT-0008",
+    "patient_email": "khushi@khushi.com",
+    "patient_name": "khushu",
+    "doctor_email": "anagha@anagha.com",
+    "doctor_name": "anagha",
+    "date": "2026-03-23",
+    "time_slot": "09:00 AM",
+    "status": "Pending",
+    "case_id": "CASE-0012",
+    "notes": "",
+    "created_at": "23 Mar 2026, 04:23 PM"
+  },
+  {
+    "appointment_id": "APPT-0009",
+    "patient_email": "khushi@khushi.com",
+    "patient_name": "khushu",
+    "doctor_email": "anagha@anagha.com",
+    "doctor_name": "anagha",
+    "date": "2026-03-24",
+    "time_slot": "04:00 PM",
+    "status": "Confirmed",
+    "case_id": "CASE-0013",
+    "notes": "",
+    "created_at": "24 Mar 2026, 04:24 AM",
+    "meet_link": "https://meet.jit.si/nayana-appt-0009"
+  },
+  {
+    "appointment_id": "APPT-0010",
+    "patient_email": "khushi@khushi.com",
+    "patient_name": "khushu",
+    "doctor_email": "anagha@anagha.com",
+    "doctor_name": "anagha",
+    "date": "2026-03-24",
+    "time_slot": "09:00 AM",
+    "status": "Pending",
+    "case_id": "CASE-0014",
+    "notes": "",
+    "created_at": "24 Mar 2026, 04:24 AM"
   }
 ]

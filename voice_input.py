@@ -80,7 +80,8 @@ def extract_symptoms(text):
     for keyword, symptom in SYMPTOM_KEYWORDS.items():
         if keyword in text_lower and symptom not in found:
             found.append(symptom)
-    return found if found else ["No specific symptoms detected"]
+    # Fallback: return the actual spoken description so doctor sees it
+    return found if found else [text.strip()]
 
 def translate_to_english(text, source_language):
     if source_language == "English":

@@ -16,5 +16,5 @@ def triage(answers):
     ]
     for q in internal_flags:
         if answers.get(q, False):
-            return 'fundus'
-    return 'front'
+            return {"type": "fundus", "reason": f"Flagged: {q}"}
+    return {"type": "front", "reason": "No internal symptoms reported"}
