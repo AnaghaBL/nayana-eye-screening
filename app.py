@@ -107,7 +107,7 @@ def update_appointment_status(appt_id, status):
     with open(APPOINTMENTS_FILE, 'wb') as f:
         f.write(encrypted)
 
-@st.experimental_dialog("Appointment Confirmed", width="small")
+@st.dialog("Appointment Confirmed", width="small")
 def show_booking_success(details):
     st.success(f"Successfully booked with Dr. {details['doc_name']}!")
     st.markdown(f"**Date:** {details['date']}")
