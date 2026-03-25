@@ -232,90 +232,68 @@ def render_patient_health_record(user):
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Download all reports as ZIP ────────────────────────────
+    # ── Download all reports as Consolidated PDF ───────────────
     if visits:
-        if st.button("Download All Reports as ZIP",
+        if st.button("Download Consolidated History as PDF",
                      use_container_width=True,
-                     key="dl_all_zip"):
-            with st.spinner(
-                "Generating all reports..."
-            ):
+                     key="dl_all_pdf"):
+            with st.spinner("Generating consolidated report..."):
                 from report_generator import generate_report
-                zip_buf = io.BytesIO()
-                with zipfile.ZipFile(zip_buf, 'w') as zf:
-                    for v in visits:
-                        try:
-                            case_probs = np.array(
-                                v.get('probs', [0]*8))
-                            case_det   = v.get(
-                                'detected_conditions', [])
-                            msgs       = load_messages(
-                                v['case_id'])
-                            with tempfile.NamedTemporaryFile(
-                                delete=False, suffix='.pdf'
-                            ) as tmp:
-                                pdf_path = generate_report(
-                                    patient_name=v['patient_name'],
-                                    patient_age=v['patient_age'],
-                                    patient_gender=v['patient_gender'],
-                                    patient_email=patient_email,
-                                    symptoms=v['symptoms'],
-                                    quality_score=v['quality_score'],
-                                    quality_tips=[],
-                                    probs=case_probs,
-                                    detected_conditions=case_det,
-                                    risk_level=v['risk_level'],
-                                    risk_type=(
-                                        'high'
-                                        if 'High' in v['risk_level']
-                                        or 'specialist' in v['risk_level']
-                                        else 'moderate'
-                                        if 'Moderate' in v['risk_level']
-                                        else 'low'
-                                    ),
-                                    original_image_pil=Image.open(
-                                        v['image_path'])
-                                        if v.get('image_path') and
-                                        os.path.exists(v['image_path'])
-                                        else None,
-                                    heatmap_array=np.array(
-                                        Image.open(v['heatmap_path']))
-                                        if v.get('heatmap_path') and
-                                        os.path.exists(v['heatmap_path'])
-                                        else None,
-                                    doctor_diagnosis=v.get(
-                                        'doctor_diagnosis'),
-                                    doctor_prescription=v.get(
-                                        'doctor_prescription'),
-                                    doctor_referral=v.get(
-                                        'doctor_referral'),
-                                    doctor_notes=v.get(
-                                        'doctor_notes'),
-                                    reviewed_at=v.get('reviewed_at'),
-                                    chat_messages=msgs,
-                                    visit_history=visits,
-                                    output_path=tmp.name
-                                )
-                            zf.write(
-                                pdf_path,
-                                f"nayana_{v['case_id']}.pdf")
-                        except Exception as e:
-                            st.warning(
-                                f"Could not generate report "
-                                f"for {v['case_id']}: {e}")
-                zip_buf.seek(0)
-                st.session_state['zip_data'] = zip_buf.read()
+                from pypdf import PdfWriter
+                
+                merger = PdfWriter()
+                
+                for v in visits:
+                    try:
+                        case_probs = np.array(v.get('probs', [0]*8))
+                        case_det   = v.get('detected_conditions', [])
+                        msgs       = load_messages(v['case_id'])
+                        
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                            pdf_path = generate_report(
+                                patient_name=v['patient_name'],
+                                patient_age=v['patient_age'],
+                                patient_gender=v['patient_gender'],
+                                patient_email=patient_email,
+                                symptoms=v['symptoms'],
+                                quality_score=v['quality_score'],
+                                quality_tips=[],
+                                probs=case_probs,
+                                detected_conditions=case_det,
+                                risk_level=v['risk_level'],
+                                risk_type=(
+                                    'high' if 'High' in v['risk_level'] or 'specialist' in v['risk_level']
+                                    else 'moderate' if 'Moderate' in v['risk_level'] else 'low'
+                                ),
+                                original_image_pil=Image.open(v['image_path']) if v.get('image_path') and os.path.exists(v['image_path']) else None,
+                                heatmap_array=np.array(Image.open(v['heatmap_path'])) if v.get('heatmap_path') and os.path.exists(v['heatmap_path']) else None,
+                                doctor_diagnosis=v.get('doctor_diagnosis'),
+                                doctor_prescription=v.get('doctor_prescription'),
+                                doctor_referral=v.get('doctor_referral'),
+                                doctor_notes=v.get('doctor_notes'),
+                                reviewed_at=v.get('reviewed_at'),
+                                chat_messages=msgs,
+                                visit_history=visits,
+                                output_path=tmp.name
+                            )
+                        merger.append(pdf_path)
+                    except Exception as e:
+                        st.warning(f"Could not include report for {v['case_id']}: {e}")
+                
+                pdf_buf = io.BytesIO()
+                merger.write(pdf_buf)
+                merger.close()
+                pdf_buf.seek(0)
+                st.session_state['consolidated_pdf'] = pdf_buf.read()
 
-        if st.session_state.get('zip_data'):
+        if st.session_state.get('consolidated_pdf'):
             st.download_button(
-                "Download ZIP",
-                data=st.session_state['zip_data'],
-                file_name=f"nayana_all_reports_"
-                          f"{profile['name'].replace(' ','_')}"
-                          f".zip",
-                mime="application/zip",
+                "Download Consolidated PDF",
+                data=st.session_state['consolidated_pdf'],
+                file_name=f"nayana_history_{profile['name'].replace(' ','_')}.pdf",
+                mime="application/pdf",
                 use_container_width=True,
-                key="dl_zip_btn"
+                key="dl_pdf_btn"
             )
 
     st.write("")

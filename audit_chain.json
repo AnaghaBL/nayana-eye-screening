@@ -28,5 +28,35 @@
     "details": "",
     "prev_hash": "6ef1b27c72b335e9e6287cd512a7e13cbc17ee41c2ea5dc7c26e11026bb1dcae",
     "hash": "1bc1244487a7f26e552451fd123cfc58065f2ecbb525554cdf450b31bf66b078"
+  },
+  {
+    "index": 3,
+    "timestamp": "2026-03-25T13:38:09.255943",
+    "action": "CASE_CREATED",
+    "case_id": "CASE-0004",
+    "actor": "medha@medha.com",
+    "details": "",
+    "prev_hash": "1bc1244487a7f26e552451fd123cfc58065f2ecbb525554cdf450b31bf66b078",
+    "hash": "626ab7a578e477fcb56be68c59a82e733d73f4e0be458abe459dacd38bdf47ae"
+  },
+  {
+    "index": 4,
+    "timestamp": "2026-03-25T14:30:35.202151",
+    "action": "CASE_CREATED",
+    "case_id": "CASE-0005",
+    "actor": "khushi@khushi.com",
+    "details": "",
+    "prev_hash": "626ab7a578e477fcb56be68c59a82e733d73f4e0be458abe459dacd38bdf47ae",
+    "hash": "bea70f87adbaf7449cc2151a5188db66a6f2819a14a1bc6f8800ba501fd683d8"
+  },
+  {
+    "index": 5,
+    "timestamp": "2026-03-25T14:31:32.084236",
+    "action": "CASE_REVIEWED",
+    "case_id": "CASE-0005",
+    "actor": "doctor",
+    "details": "",
+    "prev_hash": "bea70f87adbaf7449cc2151a5188db66a6f2819a14a1bc6f8800ba501fd683d8",
+    "hash": "c285d017dd33d5e06a2bb052b285f5e32111c9a4ef6cf2398643d27011cb6e0c"
   }
 ]
