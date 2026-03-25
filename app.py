@@ -29,6 +29,7 @@ import tempfile
 import os
 import hashlib
 from encryption import encrypt_data, decrypt_data
+from chatbot_flow import render_chatbot_screening
 
 # ── Appointments ───────────────────────────────────────────────
 APPOINTMENTS_FILE = "appointments.json"
@@ -310,9 +311,90 @@ for key, val in {
     'show_front_cam':     False,
     'show_fundus_cam':    False,
     'screening_step':     1,
+    # ── chatbot flow ──────────────────────────────────────────
+    'chat_stage':         'greeting',
+    'chat_symptoms':      [],
+    'quest_index':        0,
+    'chat_raw_text':      '',
+    'chat_clarify_text':  '',
+    # ── consent ───────────────────────────────────────────────
+    'consent_accepted':   False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
+
+# ── Consent popup gate ─────────────────────────────────────────
+if not st.session_state['consent_accepted']:
+    _,_col,_ = st.columns([1, 2.2, 1])
+    with _col:
+        st.markdown("""
+        <div style="background:linear-gradient(135deg,#1e1b4b,#1a1a2e);
+                    border:2px solid rgba(129,140,248,0.35);
+                    border-radius:24px;padding:36px 32px;margin-top:48px;">
+          <div style="text-align:center;margin-bottom:8px;">
+            <span style="font-family:'Space Mono',monospace;font-size:32px;
+                         font-weight:700;color:#f59e0b;letter-spacing:-1px;">nayana</span>
+          </div>
+          <div style="text-align:center;font-size:11px;letter-spacing:3px;
+                      color:#475569;text-transform:uppercase;margin-bottom:24px;">
+            Terms of Use &amp; Patient Consent
+          </div>
+
+          <p style="font-size:14px;color:#94a3b8;line-height:1.7;margin-bottom:14px;">
+            This app supports <strong style="color:#e2e8f0;">tele-ophthalmology services</strong>
+            and assists qualified professionals in screening and consultation.
+          </p>
+
+          <p style="font-size:14px;color:#94a3b8;line-height:1.7;margin-bottom:14px;">
+            <strong style="color:#f59e0b;">⚕️ Clinical oversight:</strong>
+            Final diagnosis and treatment decisions must be made by a
+            <strong style="color:#e2e8f0;">licensed eye care professional</strong>.
+          </p>
+
+          <p style="font-size:14px;color:#94a3b8;line-height:1.7;margin-bottom:14px;">
+            By using this app, you agree to:
+          </p>
+          <ul style="font-size:13px;color:#94a3b8;line-height:2;padding-left:20px;margin-bottom:16px;">
+            <li>Provide accurate and complete information</li>
+            <li>Follow medical advice provided through this platform</li>
+            <li>Seek <strong style="color:#f87171;">immediate medical care</strong> in emergencies</li>
+          </ul>
+
+          <p style="font-size:13px;color:#64748b;line-height:1.6;margin-bottom:20px;">
+            🔒 All data is securely stored using encryption. Results may vary
+            based on image and device conditions.
+          </p>
+
+          <p style="font-size:12px;color:#475569;line-height:1.6;margin-bottom:8px;
+                    padding:12px;background:rgba(248,113,113,0.08);
+                    border:1px solid rgba(248,113,113,0.2);border-radius:12px;">
+            🚨 <strong style="color:#fca5a5;">Emergency Notice:</strong>
+            This app is <em>not</em> for emergency situations. For sudden vision
+            loss, severe pain, or injury — seek immediate medical attention.
+          </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.write("")
+        c_dec, c_acc = st.columns(2)
+        with c_dec:
+            if st.button("✗ Decline", use_container_width=True,
+                         key="consent_decline"):
+                st.error(
+                    "You must accept the terms to use Nayana. "
+                    "Please close this tab or accept to continue."
+                )
+        with c_acc:
+            if st.button("✓ Accept & Continue", type="primary",
+                         use_container_width=True,
+                         key="consent_accept"):
+                st.session_state['consent_accepted'] = True
+                st.rerun()
+    st.stop()  # halt all further rendering until consent is given
+
+
+
+
 
 # ── ML helpers ─────────────────────────────────────────────────
 def check_quality(image_np):
@@ -518,6 +600,9 @@ def patient_navbar(user):
                      use_container_width=True, key="nav_scr"):
             st.session_state['page'] = 'screening'
             st.session_state['screening_step'] = 1
+            st.session_state['chat_stage']     = 'greeting'
+            st.session_state['chat_symptoms']  = []
+            st.session_state['quest_index']    = 0
             st.rerun()
 
         results_label = f"Results  +{new_reviews + unread_msgs} new" if (new_reviews + unread_msgs) > 0 else "Results"
@@ -552,6 +637,16 @@ def patient_navbar(user):
             for k in keys_to_clear:
                 del st.session_state[k]
             st.rerun()
+
+        st.write("")
+        st.info(
+            "**Terms & Consent**\n\n"
+            "This app supports tele-ophthalmology services. All diagnoses must "
+            "be made by a licensed professional. Your data is securely encrypted.\n\n"
+            "By using this app you agree to provide accurate information, follow "
+            "medical advice, and seek immediate care in emergencies.\n\n"
+            "Not for emergency use — call emergency services for sudden vision loss or severe pain."
+        )
 
 def doctor_navbar(doc):
     pending_cases, pending_appts, unread_msgs = get_doctor_notifications(doc['email'])
@@ -623,6 +718,16 @@ def doctor_navbar(doc):
             for k in keys_to_clear:
                 del st.session_state[k]
             st.rerun()
+
+        st.write("")
+        st.info(
+            "**Terms & Consent**\n\n"
+            "This app supports tele-ophthalmology services. All diagnoses must "
+            "be made by a licensed professional. Your data is securely encrypted.\n\n"
+            "By using this app you agree to provide accurate information, follow "
+            "medical advice, and seek immediate care in emergencies.\n\n"
+            "Not for emergency use — call emergency services for sudden vision loss or severe pain."
+        )
 
 def _clear_session():
     """Clears all session state on logout to prevent data leakage."""
@@ -1097,165 +1202,9 @@ elif st.session_state['role'] == 'patient':
         if st.session_state['page'] == 'screening':
             step_bar(st.session_state.get('screening_step', 1))
 
-            # STEP 1: Symptoms
+            # STEP 1: Conversational chatbot screening flow
             if st.session_state['screening_step'] == 1:
-                st.markdown(
-                    '<div class="page-title">'
-                    'How are your eyes feeling?</div>',
-                    unsafe_allow_html=True)
-                st.markdown(
-                    '<div class="page-sub">Answer a few quick '
-                    'questions so we know which test is right '
-                    'for you</div>',
-                    unsafe_allow_html=True)
-
-                with st.expander("Your Details", expanded=True):
-                    c1,c2,c3 = st.columns(3)
-                    pname   = c1.text_input(
-                        "Name", value=user['name'])
-                    page_   = c2.number_input(
-                        "Age",1,120,value=user['age'])
-                    pgender = c3.selectbox(
-                        "Gender",["Male","Female","Other"],
-                        index=["Male","Female","Other"].index(
-                            user['gender']))
-                    st.session_state['pname']   = pname
-                    st.session_state['page_']   = page_
-                    st.session_state['pgender'] = pgender
-
-                st.write("")
-                st.markdown(
-                    '<div class="section-label">'
-                    'Describe your symptoms (optional)</div>',
-                    unsafe_allow_html=True)
-                method = st.radio(
-                    "How would you like to describe symptoms?",
-                    ["Type","Voice"], horizontal=True)
-
-                if method == "Type":
-                    COMMON_SYMPTOMS = [
-                        "Blurred vision","Eye pain","Redness",
-                        "Watering / discharge",
-                        "Light sensitivity","Double vision",
-                        "Floaters or dark spots","Headache",
-                        "Itching","Swelling","Dryness",
-                        "Night blindness",
-                        "Halos around lights","Tunnel vision",
-                    ]
-                    picked = st.multiselect(
-                        "Select all that apply",
-                        COMMON_SYMPTOMS, key="symp_pick")
-                    symp_extra = st.text_input(
-                        "Additional details (optional)",
-                        placeholder="e.g. pain started 3 days "
-                                    "ago, worse at night...")
-                    combined = ", ".join(picked)
-                    if symp_extra:
-                        combined = ", ".join(
-                            filter(None, [combined, symp_extra]))
-                    if st.button("Confirm Symptoms",
-                                 type="primary",
-                                 key="symp_submit"):
-                        st.session_state['symp_final'] = (
-                            combined or "Not specified")
-                        st.success(
-                            f"Noted: "
-                            f"{st.session_state['symp_final']}")
-                    detected = st.session_state.get(
-                        'symp_final', combined or "Not specified")
-                else:
-                    lang = st.selectbox(
-                        "Choose your language",
-                        ["Kannada","Hindi","Tamil",
-                         "Telugu","English"])
-                    if st.button("Start Recording",
-                                 type="primary"):
-                        with st.spinner(
-                            f"Listening in {lang}..."
-                        ):
-                            res = record_voice(lang)
-                        if res["success"]:
-                            st.success(f"Got it: {res['text']}")
-                            if lang != "English":
-                                st.caption(
-                                    f"English: "
-                                    f"{res.get('english_text','')}")
-                            st.info(
-                                f"Symptoms noted: "
-                                f"{', '.join(res['symptoms'])}")
-                            detected = ", ".join(res["symptoms"])
-                            st.session_state['voice_memory'] = res
-                            st.session_state['symptoms'] = detected
-                            st.session_state['raw_speech'] = \
-                                res['text']
-                        else:
-                            st.error(res["error"])
-                            detected = "Not specified"
-                    else:
-                        detected = st.session_state.get(
-                            'symptoms','Not specified')
-                st.session_state['symp_final'] = detected
-
-                st.write("")
-                st.markdown(
-                    '<div class="section-label">'
-                    'Tick anything that applies</div>',
-                    unsafe_allow_html=True)
-                answers = {}
-                cols = st.columns(2)
-                for idx, question in enumerate(SYMPTOMS):
-                    with cols[idx % 2]:
-                        answers[question] = st.checkbox(
-                            question, key=f"q_{question}")
-                st.session_state['triage'] = triage(answers)
-
-                st.write("")
-                if st.button("Continue to Eye Photos",
-                             type="primary",
-                             use_container_width=True):
-                    from database import get_patient_record
-                    record = get_patient_record(user['email'])
-                    profile = (record.get('profile', {})
-                               if record else {})
-                    is_incomplete = (
-                        not profile.get('blood_group') or
-                        not profile.get('known_conditions')
-                    )
-                    if is_incomplete:
-                        st.session_state[
-                            'show_profile_prompt'] = True
-                    else:
-                        st.session_state['screening_step'] = 2
-                    st.rerun()
-
-                if st.session_state.get(
-                    'show_profile_prompt', False
-                ):
-                    st.divider()
-                    st.markdown(
-                        "### Complete your profile for "
-                        "better results")
-                    st.caption(
-                        "Your medical history helps the AI "
-                        "give more accurate recommendations.")
-                    c1,c2 = st.columns(2)
-                    if c1.button("Complete Profile Now",
-                                 type="primary",
-                                 use_container_width=True,
-                                 key="go_profile"):
-                        st.session_state[
-                            'show_profile_prompt'] = False
-                        st.session_state[
-                            'return_to_screening'] = True
-                        st.session_state['page'] = 'health_record'
-                        st.rerun()
-                    if c2.button("Skip for now",
-                                 use_container_width=True,
-                                 key="skip_profile"):
-                        st.session_state[
-                            'show_profile_prompt'] = False
-                        st.session_state['screening_step'] = 2
-                        st.rerun()
+                render_chatbot_screening(user)
 
             # STEP 2: Eye Photos
             elif st.session_state['screening_step'] == 2:
