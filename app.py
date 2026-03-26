@@ -156,33 +156,29 @@ def send_message(case_id, sender_name, sender_role, text):
 
 def render_chat(case_id, current_role, current_name):
     messages = load_messages(case_id)
-    st.markdown("""
-    <div style="font-size:11px;font-weight:700;letter-spacing:2px;
-                text-transform:uppercase;color:#818cf8;
-                margin-bottom:12px;">Messages</div>
-    """, unsafe_allow_html=True)
+    st.markdown('<div class="section-label">Messages</div>', unsafe_allow_html=True)
     if not messages:
         st.caption("No messages yet — start the conversation below.")
     else:
         for msg in messages:
             is_me      = msg['sender_role'] == current_role
             align      = "flex-end" if is_me else "flex-start"
-            bg         = "rgba(99,102,241,0.15)" if is_me else "rgba(255,255,255,0.06)"
-            border     = "rgba(99,102,241,0.4)"  if is_me else "rgba(255,255,255,0.12)"
-            name_color = "#a5b4fc" if is_me else "#94a3b8"
+            bg         = "rgba(59,130,246,0.12)" if is_me else "rgba(255,255,255,0.05)"
+            border_clr = "rgba(59,130,246,0.3)"  if is_me else "rgba(255,255,255,0.1)"
+            name_color = "#93c5fd" if is_me else "#94a3b8"
+            role_badge = msg['sender_role'].capitalize()
             st.markdown(f"""
             <div style="display:flex;justify-content:{align};margin-bottom:10px;">
                 <div style="max-width:75%;background:{bg};
-                            border:1px solid {border};
-                            border-radius:16px;padding:12px 16px;">
-                    <div style="font-size:11px;font-weight:700;
-                                color:{name_color};margin-bottom:4px;">
-                        {msg['sender_name']} ·
-                        <span style="font-weight:400;color:#64748b;">
-                            {msg['timestamp']}
-                        </span>
+                            border:1px solid {border_clr};
+                            border-radius:10px;padding:11px 15px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+                        <span style="font-size:11px;font-weight:700;color:{name_color};">{msg['sender_name']}</span>
+                        <span style="font-size:10px;font-weight:600;padding:1px 7px;
+                            border-radius:4px;background:{border_clr};opacity:0.85;">{role_badge}</span>
+                        <span style="font-size:10px;color:#64748b;margin-left:auto;">{msg['timestamp']}</span>
                     </div>
-                    <div style="font-size:14px;line-height:1.5;">
+                    <div style="font-size:14px;line-height:1.55;">
                         {msg['text']}
                     </div>
                 </div>
@@ -304,7 +300,7 @@ st.set_page_config(
 )
 
 if 'dark_mode' not in st.session_state:
-    st.session_state['dark_mode'] = True
+    st.session_state['dark_mode'] = False
 
 st.markdown(load_css(st.session_state['dark_mode']),
             unsafe_allow_html=True)
@@ -345,64 +341,47 @@ if not st.session_state['consent_accepted']:
     _,_col,_ = st.columns([1, 2.2, 1])
     with _col:
         st.markdown("""
-        <div style="background:linear-gradient(135deg,#1e1b4b,#1a1a2e);
-                    border:2px solid rgba(129,140,248,0.35);
-                    border-radius:24px;padding:36px 32px;margin-top:48px;">
-          <div style="text-align:center;margin-bottom:8px;">
-            <span style="font-family:'Space Mono',monospace;font-size:32px;
-                         font-weight:700;color:#f59e0b;letter-spacing:-1px;">nayana</span>
-          </div>
-          <div style="text-align:center;font-size:11px;letter-spacing:3px;
-                      color:#475569;text-transform:uppercase;margin-bottom:24px;">
-            Terms of Use &amp; Patient Consent
-          </div>
+        <div class="consent-card">
+          <div class="consent-brand">nayana</div>
+          <div class="consent-subtitle">Terms of Use &amp; Patient Consent</div>
 
-          <p style="font-size:14px;color:#94a3b8;line-height:1.7;margin-bottom:14px;">
-            This app supports <strong style="color:#e2e8f0;">tele-ophthalmology services</strong>
-            and assists qualified professionals in screening and consultation.
+          <p class="consent-body">
+            This app supports <strong>tele-ophthalmology services</strong>
+            and assists qualified professionals in eye screening and consultation.
           </p>
-
-          <p style="font-size:14px;color:#94a3b8;line-height:1.7;margin-bottom:14px;">
-            <strong style="color:#f59e0b;">⚕️ Clinical oversight:</strong>
-            Final diagnosis and treatment decisions must be made by a
-            <strong style="color:#e2e8f0;">licensed eye care professional</strong>.
+          <p class="consent-body">
+            <strong>&#x2695;&#xFE0F; Clinical oversight:</strong>
+            Final diagnosis and treatment decisions must always be made by a
+            <strong>licensed eye care professional</strong> — not by this app alone.
           </p>
-
-          <p style="font-size:14px;color:#94a3b8;line-height:1.7;margin-bottom:14px;">
-            By using this app, you agree to:
-          </p>
-          <ul style="font-size:13px;color:#94a3b8;line-height:2;padding-left:20px;margin-bottom:16px;">
+          <p class="consent-body" style="margin-bottom:8px;">By using this app, you agree to:</p>
+          <ul style="font-size:13px;line-height:2.1;padding-left:22px;margin-bottom:18px;">
             <li>Provide accurate and complete information</li>
             <li>Follow medical advice provided through this platform</li>
-            <li>Seek <strong style="color:#f87171;">immediate medical care</strong> in emergencies</li>
+            <li>Seek <strong>immediate medical care</strong> in emergencies</li>
           </ul>
-
-          <p style="font-size:13px;color:#64748b;line-height:1.6;margin-bottom:20px;">
-            🔒 All data is securely stored using encryption. Results may vary
-            based on image and device conditions.
+          <p style="font-size:12px;color:#64748b;line-height:1.6;margin-bottom:0;">
+            &#x1F512; All data is securely encrypted. Results may vary based on image and device conditions.
           </p>
-
-          <p style="font-size:12px;color:#475569;line-height:1.6;margin-bottom:8px;
-                    padding:12px;background:rgba(248,113,113,0.08);
-                    border:1px solid rgba(248,113,113,0.2);border-radius:12px;">
-            🚨 <strong style="color:#fca5a5;">Emergency Notice:</strong>
-            This app is <em>not</em> for emergency situations. For sudden vision
-            loss, severe pain, or injury — seek immediate medical attention.
-          </p>
+          <div class="consent-emergency">
+            <strong>&#x1F6A8; Emergency Notice:</strong>
+            This app is <em>not</em> for emergency situations.
+            For sudden vision loss, severe pain, or injury&#8202;—&#8202;seek immediate medical attention.
+          </div>
         </div>
         """, unsafe_allow_html=True)
 
         st.write("")
         c_dec, c_acc = st.columns(2)
         with c_dec:
-            if st.button("✗ Decline", use_container_width=True,
+            if st.button("Decline", use_container_width=True,
                          key="consent_decline"):
                 st.error(
                     "You must accept the terms to use Nayana. "
                     "Please close this tab or accept to continue."
                 )
         with c_acc:
-            if st.button("✓ Accept & Continue", type="primary",
+            if st.button("Accept & Continue", type="primary",
                          use_container_width=True,
                          key="consent_accept"):
                 st.session_state['consent_accepted'] = True
@@ -592,25 +571,21 @@ def patient_navbar(user):
 
     with st.sidebar:
         st.markdown("""
-        <div style="font-size:24px;font-weight:900;color:#f59e0b;
-                    font-family:'Nunito',sans-serif;letter-spacing:-1px;
-                    margin-bottom:4px;">nayana</div>
-        <div style="font-size:11px;color:#475569;margin-bottom:20px;">
-            AI Eye Screening
+        <div class="sidebar-brand">
+          <div class="sidebar-wordmark">nayana</div>
+          <div class="sidebar-tag">AI Eye Screening</div>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown(f"""
-        <div style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.2);
-                    border-radius:12px;padding:14px;margin-bottom:20px;">
-            <div style="font-size:15px;font-weight:700;color:#e2e8f0;">{user['name']}</div>
-            <div style="font-size:12px;color:#64748b;">Patient · {user['email']}</div>
+        <div class="sidebar-user">
+            <div class="sidebar-user-name">{user['name']}</div>
+            <div class="sidebar-user-meta">Patient &nbsp;·&nbsp; {user['email']}</div>
         </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("""<div style="font-size:10px;font-weight:700;letter-spacing:2px;
-                    text-transform:uppercase;color:#475569;margin-bottom:8px;">
-                    Navigation</div>""", unsafe_allow_html=True)
+        st.markdown('<div class="sidebar-nav-label">Navigation</div>',
+                    unsafe_allow_html=True)
 
         if st.button("Screening",
                      type=("primary" if st.session_state['page']=='screening' else "secondary"),
@@ -635,17 +610,14 @@ def patient_navbar(user):
             st.session_state['page'] = 'health_record'
             st.rerun()
 
-        st.write("")
-        st.markdown("""<div style="font-size:10px;font-weight:700;letter-spacing:2px;
-                    text-transform:uppercase;color:#475569;margin-bottom:8px;">
-                    My Stats</div>""", unsafe_allow_html=True)
+        st.markdown('<div class="sidebar-nav-label">My Stats</div>',
+                    unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         c1.metric("Screenings", total)
         c2.metric("Reviewed", reviewed)
 
-        st.write("")
         st.divider()
-        dark_label = "Switch to Light Mode" if st.session_state['dark_mode'] else "Switch to Dark Mode"
+        dark_label = "☀ Light Mode" if st.session_state['dark_mode'] else "◑ Dark Mode"
         if st.button(dark_label, use_container_width=True, key="nav_theme"):
             st.session_state['dark_mode'] = not st.session_state['dark_mode']
             st.rerun()
@@ -656,14 +628,13 @@ def patient_navbar(user):
             st.rerun()
 
         st.write("")
-        st.info(
-            "**Terms & Consent**\n\n"
-            "This app supports tele-ophthalmology services. All diagnoses must "
-            "be made by a licensed professional. Your data is securely encrypted.\n\n"
-            "By using this app you agree to provide accurate information, follow "
-            "medical advice, and seek immediate care in emergencies.\n\n"
-            "Not for emergency use — call emergency services for sudden vision loss or severe pain."
-        )
+        st.markdown("""
+        <div class="info-banner">
+          <strong>&#x1F512; Consent &amp; Terms</strong><br>
+          Results are AI-assisted only. All diagnoses must be confirmed by a licensed eye care
+          professional. Your data is securely encrypted. Not for emergency use.
+        </div>
+        """, unsafe_allow_html=True)
 
 def doctor_navbar(doc):
     pending_cases, pending_appts, unread_msgs = get_doctor_notifications(doc['email'])
@@ -672,25 +643,22 @@ def doctor_navbar(doc):
 
     with st.sidebar:
         st.markdown("""
-        <div style="font-size:24px;font-weight:900;color:#f59e0b;
-                    font-family:'Nunito',sans-serif;letter-spacing:-1px;
-                    margin-bottom:2px;">nayana</div>
-        <div style="font-size:11px;font-weight:700;color:#818cf8;
-                    letter-spacing:2px;margin-bottom:20px;">DOCTOR</div>
-        """, unsafe_allow_html=True)
-
-        st.markdown(f"""
-        <div style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.2);
-                    border-radius:12px;padding:14px;margin-bottom:20px;">
-            <div style="font-size:15px;font-weight:700;color:#e2e8f0;">Dr. {doc['name']}</div>
-            <div style="font-size:12px;color:#64748b;">{doc.get('specialization','Ophthalmologist')}</div>
-            <div style="font-size:11px;color:#475569;">{doc.get('hospital','')}</div>
+        <div class="sidebar-brand">
+          <div class="sidebar-wordmark">nayana</div>
+          <div class="sidebar-tag">Doctor Portal</div>
         </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("""<div style="font-size:10px;font-weight:700;letter-spacing:2px;
-                    text-transform:uppercase;color:#475569;margin-bottom:8px;">
-                    Navigation</div>""", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="sidebar-user">
+            <div class="sidebar-user-name">Dr. {doc['name']}</div>
+            <div class="sidebar-user-meta">{doc.get('specialization','Ophthalmologist')}</div>
+            <div class="sidebar-user-meta" style="margin-top:2px;">{doc.get('hospital','')}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown('<div class="sidebar-nav-label">Navigation</div>',
+                    unsafe_allow_html=True)
 
         cases_label = f"Cases  +{pending_cases} pending" if pending_cases > 0 else "Cases"
         if st.button(cases_label,
@@ -713,20 +681,17 @@ def doctor_navbar(doc):
             st.session_state['doctor_page'] = 'messages'
             st.rerun()
 
-        st.write("")
-        st.markdown("""<div style="font-size:10px;font-weight:700;letter-spacing:2px;
-                    text-transform:uppercase;color:#475569;margin-bottom:8px;">
-                    Dashboard</div>""", unsafe_allow_html=True)
+        st.markdown('<div class="sidebar-nav-label">Dashboard</div>',
+                    unsafe_allow_html=True)
         c1, c2 = st.columns(2)
-        c1.metric("Total Cases", total_cases)
+        c1.metric("Cases", total_cases)
         c2.metric("Pending", pending_cases)
         c3, c4 = st.columns(2)
-        c3.metric("Appointments", len(all_appts))
+        c3.metric("Appts", len(all_appts))
         c4.metric("Messages", unread_msgs)
 
-        st.write("")
         st.divider()
-        dark_label = "Switch to Light Mode" if st.session_state['dark_mode'] else "Switch to Dark Mode"
+        dark_label = "☀ Light Mode" if st.session_state['dark_mode'] else "◑ Dark Mode"
         if st.button(dark_label, use_container_width=True, key="dnav_theme"):
             st.session_state['dark_mode'] = not st.session_state['dark_mode']
             st.rerun()
@@ -737,14 +702,13 @@ def doctor_navbar(doc):
             st.rerun()
 
         st.write("")
-        st.info(
-            "**Terms & Consent**\n\n"
-            "This app supports tele-ophthalmology services. All diagnoses must "
-            "be made by a licensed professional. Your data is securely encrypted.\n\n"
-            "By using this app you agree to provide accurate information, follow "
-            "medical advice, and seek immediate care in emergencies.\n\n"
-            "Not for emergency use — call emergency services for sudden vision loss or severe pain."
-        )
+        st.markdown("""
+        <div class="info-banner">
+          <strong>&#x1F512; Consent &amp; Terms</strong><br>
+          Results are AI-assisted only. All diagnoses must be confirmed by a licensed professional.
+          Data is securely encrypted. Not for emergency use.
+        </div>
+        """, unsafe_allow_html=True)
 
 def _clear_session():
     """Clears all session state on logout to prevent data leakage."""
@@ -805,9 +769,9 @@ def render_my_results(my_cases):
         fig, ax = plt.subplots(figsize=(8, 2.4))
         fig.patch.set_facecolor(bg)
         ax.set_facecolor(bg)
-        clrs = {1:'#2d9e6b', 2:'#f4a261', 3:'#e63946'}
+        clrs = {1:'#0d9488', 2:'#d97706', 3:'#dc2626'}
         ax.plot(timestamps, risk_scores,
-                color='#b7e4c7', linewidth=2, zorder=1)
+                color='#3b82f6', linewidth=2, zorder=1, alpha=0.5)
         ax.scatter(timestamps, risk_scores,
                    c=[clrs[s] for s in risk_scores],
                    s=80, zorder=2)
@@ -871,11 +835,14 @@ def render_my_results(my_cases):
                         elif p>0.5: pc2.warning(f"{p*100:.0f}%")
                         else:       pc2.info(f"{p*100:.0f}%")
                 if "High" in risk or "specialist" in risk:
-                    st.error(f"High Risk — {risk}")
+                    st.markdown('<div class="risk-pill risk-high" style="margin-top:8px;"></div>', unsafe_allow_html=True)
+                    st.error(f"▲ High Risk — {risk}")
                 elif "Moderate" in risk or "follow" in risk.lower():
-                    st.warning(f"Moderate — {risk}")
+                    st.markdown('<div class="risk-pill risk-moderate" style="margin-top:8px;"></div>', unsafe_allow_html=True)
+                    st.warning(f"◆ Moderate — {risk}")
                 else:
-                    st.success(f"Low Risk — {risk}")
+                    st.markdown('<div class="risk-pill risk-low" style="margin-top:8px;"></div>', unsafe_allow_html=True)
+                    st.success(f"● Low Risk — {risk}")
 
             st.divider()
             st.markdown("**Your doctor said:**")
@@ -913,15 +880,39 @@ def render_my_results(my_cases):
                     placeholder="e.g. Bengaluru",
                     key=f"pharm_city_{case['case_id']}")
                 if pharm_city:
-                    purl = f"https://www.google.com/maps/search/pharmacy+near+{pharm_city.replace(' ','+')}"
-                    st.markdown(f'<a href="{purl}" target="_blank"><button style="background:#2d9e6b;color:white;border:none;border-radius:10px;padding:8px 16px;width:100%;cursor:pointer;font-weight:700;">Find Pharmacies near {pharm_city}</button></a>', unsafe_allow_html=True)
+                    purl = f"https://www.google.com/maps/search/pharmacy+near+{pharm_city.replace(' ', '+')}"
+                    st.markdown(
+                        f'<a href="{purl}" target="_blank">'
+                        f'<button style="background:#0d9488;color:white;border:none;'
+                        f'border-radius:8px;padding:9px 16px;width:100%;cursor:pointer;'
+                        f'font-weight:600;font-family:\'Inter\',sans-serif;font-size:13px;">'
+                        f'&#128205; Find Pharmacies near {pharm_city}</button></a>',
+                        unsafe_allow_html=True)
 
                 st.write("")
                 st.markdown("**🛒 Order Medicines Online**")
                 c1, c2, c3 = st.columns(3)
-                c1.markdown('<a href="https://pharmeasy.in" target="_blank"><button style="background:#0f847e;color:white;border:none;border-radius:8px;padding:10px;width:100%;cursor:pointer;font-weight:700;">PharmEasy</button></a>', unsafe_allow_html=True)
-                c2.markdown('<a href="https://www.1mg.com" target="_blank"><button style="background:#ff6f00;color:white;border:none;border-radius:8px;padding:10px;width:100%;cursor:pointer;font-weight:700;">1mg</button></a>', unsafe_allow_html=True)
-                c3.markdown('<a href="https://www.netmeds.com" target="_blank"><button style="background:#32aeb1;color:white;border:none;border-radius:8px;padding:10px;width:100%;cursor:pointer;font-weight:700;">Netmeds</button></a>', unsafe_allow_html=True)
+                c1.markdown(
+                    '<a href="https://pharmeasy.in" target="_blank">'
+                    '<button style="background:#0d9488;color:white;border:none;'
+                    'border-radius:8px;padding:10px;width:100%;cursor:pointer;'
+                    'font-weight:600;font-family:\'Inter\',sans-serif;font-size:13px;">'
+                    'PharmEasy</button></a>',
+                    unsafe_allow_html=True)
+                c2.markdown(
+                    '<a href="https://www.1mg.com" target="_blank">'
+                    '<button style="background:#2563eb;color:white;border:none;'
+                    'border-radius:8px;padding:10px;width:100%;cursor:pointer;'
+                    'font-weight:600;font-family:\'Inter\',sans-serif;font-size:13px;">'
+                    '1mg</button></a>',
+                    unsafe_allow_html=True)
+                c3.markdown(
+                    '<a href="https://www.netmeds.com" target="_blank">'
+                    '<button style="background:#0f766e;color:white;border:none;'
+                    'border-radius:8px;padding:10px;width:100%;cursor:pointer;'
+                    'font-weight:600;font-family:\'Inter\',sans-serif;font-size:13px;">'
+                    'Netmeds</button></a>',
+                    unsafe_allow_html=True)
 
                 rx_pdf_key = f"rx_pdf_{case['case_id']}"
                 if rx_pdf_key not in st.session_state:
@@ -1046,28 +1037,28 @@ def render_my_results(my_cases):
 if st.session_state['role'] is None:
     st.markdown("""
     <div class="nayana-hero">
-        <div class="nayana-wordmark">nayana</div>
-        <div class="nayana-meaning">the eye</div>
+        <div class="nayana-wordmark">na<span>ya</span>na</div>
+        <div class="nayana-meaning">the eye &nbsp;&middot;&nbsp; AI-assisted tele-ophthalmology</div>
         <div class="nayana-tagline">
-            Free AI eye screening — get results in 3 minutes
+            Free AI eye screening — get results in under 3 minutes
             and connect with a specialist from anywhere.
         </div>
         <div class="stat-row">
             <div class="stat-item">
                 <div class="stat-num">8</div>
-                <div class="stat-lbl">conditions checked</div>
+                <div class="stat-lbl">conditions screened</div>
             </div>
             <div class="stat-item">
                 <div class="stat-num">6,392</div>
-                <div class="stat-lbl">cases trained on</div>
+                <div class="stat-lbl">training cases</div>
             </div>
             <div class="stat-item">
                 <div class="stat-num">5</div>
                 <div class="stat-lbl">languages</div>
             </div>
             <div class="stat-item">
-                <div class="stat-num">3 min</div>
-                <div class="stat-lbl">to get results</div>
+                <div class="stat-num">&lt;3 min</div>
+                <div class="stat-lbl">to results</div>
             </div>
         </div>
     </div>
@@ -1077,9 +1068,10 @@ if st.session_state['role'] is None:
     with c1:
         st.markdown("""
         <div class="portal-card">
+            <div class="portal-icon">&#128065;</div>
             <div class="portal-title">Patient</div>
-            <div class="portal-sub">Screen my eyes and get
-            expert feedback</div>
+            <div class="portal-sub">Screen your eyes and receive
+            expert feedback from a doctor.</div>
         </div>
         """, unsafe_allow_html=True)
         if st.button("Start Screening", type="primary",
@@ -1089,10 +1081,11 @@ if st.session_state['role'] is None:
             st.rerun()
     with c2:
         st.markdown("""
-        <div class="portal-card">
+        <div class="portal-card doctor">
+            <div class="portal-icon">&#129657;</div>
             <div class="portal-title">Doctor</div>
-            <div class="portal-sub">Review cases and help
-            patients remotely</div>
+            <div class="portal-sub">Review AI-assisted cases and
+            consult patients remotely.</div>
         </div>
         """, unsafe_allow_html=True)
         if st.button("Review Cases",
@@ -1102,10 +1095,11 @@ if st.session_state['role'] is None:
             st.rerun()
     with c3:
         st.markdown("""
-        <div class="portal-card">
+        <div class="portal-card admin">
+            <div class="portal-icon">&#128737;</div>
             <div class="portal-title">Admin</div>
             <div class="portal-sub">Verify doctor registrations
-            and manage the platform</div>
+            and manage the platform.</div>
         </div>
         """, unsafe_allow_html=True)
         if st.button("Admin Login",
@@ -1337,23 +1331,25 @@ elif st.session_state['role'] == 'patient':
                             fe_res.items(),
                             key=lambda x: x[1], reverse=True
                         ):
-                            col = ("#e63946" if score>0.6
-                                   else "#f4a261" if score>0.3
-                                   else "#2d9e6b")
+                            level = ("High" if score > 0.6
+                                     else "Mod" if score > 0.3
+                                     else "Low")
+                            level_icon = ("▲" if score > 0.6
+                                          else "◆" if score > 0.3
+                                          else "●")
+                            bar_pct = int(score * 100)
                             st.markdown(f"""
                             <div style="display:flex;
                                 justify-content:space-between;
                                 align-items:center;
-                                padding:8px 0;
-                                border-bottom:1px solid
-                                rgba(129,140,248,0.15);">
-                                <span style="font-size:14px;
-                                    font-weight:600;">
-                                    {cond}</span>
-                                <span style="font-size:15px;
-                                    font-weight:800;
-                                    color:{col};">
-                                    {score*100:.0f}%</span>
+                                padding:9px 0;
+                                border-bottom:1px solid rgba(59,130,246,0.1);">
+                                <span style="font-size:13px;font-weight:600;flex:1;">{cond}</span>
+                                <span style="font-size:12px;font-weight:700;
+                                    opacity:0.7;margin-right:10px;">{level_icon} {level}</span>
+                                <span style="font-size:13px;font-weight:800;
+                                    font-family:'Space Mono',monospace;min-width:40px;text-align:right;">
+                                    {bar_pct}%</span>
                             </div>
                             """, unsafe_allow_html=True)
                     if recs:
@@ -1519,22 +1515,23 @@ elif st.session_state['role'] == 'patient':
                             fe_results.items(),
                             key=lambda x: x[1], reverse=True
                         ):
-                            col = ("#e63946" if s>0.6
-                                   else "#f4a261" if s>0.3
-                                   else "#2d9e6b")
+                            level = ("High" if s > 0.6
+                                     else "Mod" if s > 0.3
+                                     else "Low")
+                            level_icon = ("▲" if s > 0.6
+                                          else "◆" if s > 0.3
+                                          else "●")
                             st.markdown(f"""
                             <div style="display:flex;
                                 justify-content:space-between;
                                 align-items:center;
-                                padding:8px 0;
-                                border-bottom:1px solid
-                                rgba(129,140,248,0.15);">
-                                <span style="font-size:14px;
-                                    font-weight:600;">
-                                    {cond}</span>
-                                <span style="font-size:15px;
-                                    font-weight:800;
-                                    color:{col};">
+                                padding:9px 0;
+                                border-bottom:1px solid rgba(59,130,246,0.1);">
+                                <span style="font-size:13px;font-weight:600;flex:1;">{cond}</span>
+                                <span style="font-size:12px;font-weight:700;
+                                    opacity:0.65;margin-right:10px;">{level_icon} {level}</span>
+                                <span style="font-size:13px;font-weight:800;
+                                    font-family:'Space Mono',monospace;min-width:40px;text-align:right;">
                                     {s*100:.0f}%</span>
                             </div>
                             """, unsafe_allow_html=True)
@@ -1707,12 +1704,19 @@ border:1px solid rgba(99,102,241,0.2);">
                     else:
                         st.markdown("**Registered Doctors on Nayana**")
                         for d in doctors:
+                            initials = ''.join(p[0].upper() for p in d['name'].split()[:2])
                             st.markdown(f"""
-                            <div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);
-                                        border-radius:12px;padding:14px;margin-bottom:10px;">
-                                <div style="font-size:15px;font-weight:700;color:#e2e8f0;">Dr. {d['name']}</div>
-                                <div style="font-size:12px;color:#64748b;">{d.get('specialization','Ophthalmologist')} · {d.get('hospital','')}</div>
-                                <div style="font-size:11px;color:#475569;margin-top:4px;">{d.get('email','')}</div>
+                            <div style="display:flex;align-items:flex-start;gap:14px;
+                                        background:var(--card-bg,rgba(30,37,53,1));
+                                        border:1px solid rgba(59,130,246,0.15);
+                                        border-left:3px solid #0d9488;
+                                        border-radius:10px;padding:14px;margin-bottom:10px;">
+                                <div class="doc-avatar">{initials}</div>
+                                <div style="flex:1;">
+                                  <div style="font-size:15px;font-weight:700;">Dr. {d['name']}</div>
+                                  <div style="font-size:12px;margin-top:2px;opacity:0.7;">{d.get('specialization','Ophthalmologist')} &nbsp;&middot;&nbsp; {d.get('hospital','')}</div>
+                                  <div style="font-size:11px;margin-top:4px;opacity:0.5;">{d.get('email','')}</div>
+                                </div>
                             </div>
                             """, unsafe_allow_html=True)
                     st.write("")
@@ -2481,8 +2485,8 @@ elif st.session_state['role'] == 'admin':
                 st.rerun()
     else:
         col1, col2 = st.columns([4,1])
-        col1.title("Admin — Doctor Verification")
-        col1.caption("Review submitted documents and approve or reject registrations")
+        col1.markdown('<div class="page-title">Doctor Verification</div>', unsafe_allow_html=True)
+        col1.markdown('<div class="page-sub">Review submitted credentials and approve or reject registrations.</div>', unsafe_allow_html=True)
         if col2.button("Sign Out", key="adm_so"):
             st.session_state['admin_logged_in'] = False
             st.session_state['role'] = None
@@ -2493,9 +2497,9 @@ elif st.session_state['role'] == 'admin':
         pending = get_pending_doctors()
 
         if not pending:
-            st.success("All clear — no pending verifications.")
+            st.success("✓ All clear — no pending verifications.")
         else:
-            st.warning(f"{len(pending)} doctor(s) awaiting verification")
+            st.warning(f"⏳ {len(pending)} doctor(s) awaiting verification")
             st.write("")
             for d in pending:
                 with st.expander(

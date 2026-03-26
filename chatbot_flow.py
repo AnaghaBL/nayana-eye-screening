@@ -15,18 +15,17 @@ from symptom_check import SYMPTOMS, triage
 def _bot_bubble(text: str, avatar: str = "N"):
     """Render a left-aligned Nayana chat bubble."""
     st.markdown(f"""
-    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;">
-      <div style="width:36px;height:36px;border-radius:50%;
-                  background:linear-gradient(135deg,#818cf8,#38bdf8);
+    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:14px;">
+      <div style="width:34px;height:34px;border-radius:8px;
+                  background:#3b82f6;
                   display:flex;align-items:center;justify-content:center;
-                  font-weight:800;font-size:14px;color:#fff;flex-shrink:0;">
-        {avatar}
-      </div>
-      <div style="background:rgba(129,140,248,0.12);border:1px solid rgba(129,140,248,0.3);
-                  border-radius:0 18px 18px 18px;padding:14px 18px;max-width:80%;
-                  font-size:15px;line-height:1.6;color:#e2e8f0;">
-        {text}
-      </div>
+                  font-weight:800;font-size:13px;color:#fff;flex-shrink:0;
+                  font-family:'Space Mono',monospace;"
+      >{avatar}</div>
+      <div style="background:rgba(59,130,246,0.10);border:1px solid rgba(59,130,246,0.25);
+                  border-radius:4px 12px 12px 12px;padding:13px 17px;max-width:82%;
+                  font-size:14px;line-height:1.65;font-family:'Inter',sans-serif;"
+      >{text}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -34,23 +33,23 @@ def _bot_bubble(text: str, avatar: str = "N"):
 def _user_bubble(text: str):
     """Render a right-aligned user reply bubble."""
     st.markdown(f"""
-    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
-      <div style="background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);
-                  border-radius:18px 0 18px 18px;padding:14px 18px;max-width:80%;
-                  font-size:15px;line-height:1.6;color:#e2e8f0;">
-        {text}
-      </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
+      <div style="background:rgba(13,148,136,0.10);border:1px solid rgba(13,148,136,0.28);
+                  border-radius:12px 4px 12px 12px;padding:13px 17px;max-width:82%;
+                  font-size:14px;line-height:1.65;font-family:'Inter',sans-serif;"
+      >{text}</div>
     </div>
     """, unsafe_allow_html=True)
 
 
 def _step_indicator(label: str):
     st.markdown(f"""
-    <div style="font-size:11px;font-weight:700;letter-spacing:2px;
-                text-transform:uppercase;color:#818cf8;margin-bottom:20px;
-                display:flex;align-items:center;gap:8px;">
-      <span style="width:8px;height:8px;border-radius:50%;
-                   background:#818cf8;display:inline-block;"></span>
+    <div style="font-size:10px;font-weight:700;letter-spacing:1.8px;
+                text-transform:uppercase;color:#94a3b8;margin-bottom:18px;
+                display:flex;align-items:center;gap:8px;
+                font-family:'Inter',sans-serif;">
+      <span style="width:6px;height:6px;border-radius:2px;
+                   background:#3b82f6;display:inline-block;"></span>
       {label}
     </div>
     """, unsafe_allow_html=True)
@@ -58,16 +57,18 @@ def _step_indicator(label: str):
 
 def _divider():
     st.markdown(
-        '<hr style="border:none;border-top:1px solid rgba(129,140,248,0.15);'
-        'margin:20px 0;">',
+        '<hr style="border:none;border-top:1px solid rgba(59,130,246,0.12);'
+        'margin:18px 0;">',
         unsafe_allow_html=True)
 
 
 def _symptom_tag(sym: str):
-    return (f'<span style="display:inline-block;background:rgba(129,140,248,0.18);'
-            f'border:1px solid rgba(129,140,248,0.35);border-radius:20px;'
-            f'padding:4px 14px;font-size:13px;font-weight:600;color:#a5b4fc;'
-            f'margin:3px;">{sym}</span>')
+    return (f'<span style="display:inline-flex;align-items:center;'
+            f'background:rgba(59,130,246,0.12);'
+            f'border:1px solid rgba(59,130,246,0.3);border-radius:6px;'
+            f'padding:3px 12px;font-size:12px;font-weight:600;'
+            f'font-family:\'Inter\',sans-serif;margin:3px;letter-spacing:0.2px;"\''
+            f'>{sym}</span>')
 
 
 # ── keyword matching helpers ────────────────────────────────────
@@ -652,7 +653,7 @@ def render_chatbot_screening(user: dict):
         )
 
         with st.container():
-            st.markdown('<div style="background:rgba(255,255,255,0.03);padding:20px;border-radius:16px;border:1px solid rgba(129,140,248,0.2);">', unsafe_allow_html=True)
+            st.markdown('<div style="background:rgba(59,130,246,0.05);padding:18px 20px;border-radius:10px;border:1px solid rgba(59,130,246,0.15);">', unsafe_allow_html=True)
             
             # We'll show checkboxes for all items in QUESTIONNAIRE
             selected_symptoms = []
