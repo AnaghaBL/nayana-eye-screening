@@ -30,6 +30,7 @@ import os
 import hashlib
 from encryption import encrypt_data, decrypt_data
 from chatbot_flow import render_chatbot_screening
+from optical_health_scan import run_unified_scanner
 
 # ── Appointments ───────────────────────────────────────────────
 APPOINTMENTS_FILE = "appointments.json"
@@ -610,6 +611,12 @@ def patient_navbar(user):
             st.session_state['page'] = 'health_record'
             st.rerun()
 
+        if st.button("Optical Health",
+                     type=("primary" if st.session_state['page']=='optical_scan' else "secondary"),
+                     use_container_width=True, key="nav_ohs"):
+            st.session_state['page'] = 'optical_scan'
+            st.rerun()
+
         st.markdown('<div class="sidebar-nav-label">My Stats</div>',
                     unsafe_allow_html=True)
         c1, c2 = st.columns(2)
@@ -874,7 +881,7 @@ def render_my_results(my_cases):
                     r2.info(case['doctor_notes'])
                 # ── Pharmacy & Prescription ────────────────
                 st.write("")
-                st.markdown("**📍 Find Nearby Pharmacies**")
+                st.markdown("**Find Nearby Pharmacies**")
                 pharm_city = st.text_input(
                     "Enter your city",
                     placeholder="e.g. Bengaluru",
@@ -1374,40 +1381,43 @@ elif st.session_state['role'] == 'patient':
                     '— upload if you have one</div>',
                     unsafe_allow_html=True)
 
-                uploaded = None
-                up_tab2, cam_tab2 = st.tabs([
-                    "Upload Photo","Use Camera"])
-                with up_tab2:
-                    uploaded_file = st.file_uploader(
-                        "Upload fundus image",
-                        type=["jpg","jpeg","png"],
-                        key="fundus_upload",
-                        label_visibility="collapsed")
-                    if uploaded_file:
-                        uploaded = uploaded_file
-                with cam_tab2:
-                    if not st.session_state.get(
-                        'show_fundus_cam', False
-                    ):
-                        st.info("Click below to activate "
-                                "your camera")
-                        if st.button("Activate Camera",
-                                     key="activate_fundus_cam",
-                                     type="primary"):
-                            st.session_state[
-                                'show_fundus_cam'] = True
-                            st.rerun()
-                    else:
-                        uploaded_cam = st.camera_input(
-                            "Capture retinal image",
-                            key="fundus_camera")
-                        if uploaded_cam:
-                            uploaded = uploaded_cam
-                        if st.button("Turn off camera",
-                                     key="off_fundus_cam"):
-                            st.session_state[
-                                'show_fundus_cam'] = False
-                            st.rerun()
+                # New Dongle Selection Logic
+                st.markdown('<div class="page-sub" style="font-weight:700; color:#3b82f6; margin-bottom:10px;">'
+                            'Do you have our Nayana Fundus Dongle?</div>', unsafe_allow_html=True)
+                
+                dongle_opt = st.radio(
+                    "Dongle Selection",
+                    ["Yes, I have it", "No, manual upload"],
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key="dongle_selection"
+                )
+
+                if dongle_opt == "Yes, I have it":
+                    st.markdown("""
+                    <div style="background:rgba(59,130,246,0.1); padding:15px; border-radius:10px; border-left:4px solid #3b82f6; margin-bottom:10px;">
+                        <p style="font-size:14px; margin-bottom:5px;"><strong>How to use your Dongle:</strong></p>
+                        <ol style="font-size:13px; padding-left:15px;">
+                            <li>Attach the <b>Nayana Dongle</b> to your phone's primary camera lens.</li>
+                            <li>Open your phone's <b>native camera app</b> (not this browser).</li>
+                            <li>Position the dongle near the eye and capture a clear fundus image.</li>
+                            <li>Ensure the files are saved to your device, then upload below.</li>
+                        </ol>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style="background:rgba(148,163,184,0.1); padding:15px; border-radius:10px; margin-bottom:10px;">
+                        <p style="font-size:13px; color:#64748b;">Please upload a pre-captured retinal fundus scan from your device gallery for AI analysis.</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                uploaded = st.file_uploader(
+                    "Upload fundus image",
+                    type=["jpg","jpeg","png"],
+                    key="fundus_upload",
+                    label_visibility="collapsed"
+                )
 
                 if uploaded:
                     image_pil = Image.open(
@@ -1919,6 +1929,114 @@ border:1px solid rgba(99,102,241,0.2);">
                     st.session_state['page'] = 'screening'
                     st.rerun()
             render_patient_health_record(user)
+
+        elif st.session_state['page'] == 'optical_scan':
+            st.markdown('<div class="page-title">Eye Optical Health Scan</div>', unsafe_allow_html=True)
+            st.markdown('<div class="page-sub">Asha Unified Diagnostic System for Lens & Pupil Health.</div>', unsafe_allow_html=True)
+            
+            st.write("")
+            
+            # Info Cards
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("""
+                <div class="result-card" style="padding:20px;">
+                    <h3 style="margin-top:0;color:#0d9488;">🔍 Lens Health Scan</h3>
+                    <p style="font-size:14px;color:#64748b;">Analyze lens clarity, stability, and aging (yellowing). Uses median filtering and Hough circle detection.</p>
+                    <div style="font-size:12px;background:rgba(13,148,136,0.1);padding:8px;border-radius:6px;">
+                        <strong> </strong> 
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with c2:
+                st.markdown("""
+                <div class="result-card" style="padding:20px;">
+                    <h3 style="margin-top:0;color:#3b82f6;">⚡ Pupil Reflex (PLR)</h3>
+                    <p style="font-size:14px;color:#64748b;">Tests Pupillary Light Reflex by measuring constriction speed and percentage under light stimulation.</p>
+                    <div style="font-size:12px;background:rgba(59,130,246,0.1);padding:8px;border-radius:6px;">
+                        <strong> </strong> 
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.write("")
+            
+            st.info("💡 **Neural Diagnostic:** This scanner uses high-precision **Neural Eye Tracking**. Align your eye in the central box until it turns green to perform a high-resolution Lens & Aging scan.")
+            
+            st.write("")
+            if st.button("🚀 Start Diagnostic Scanner", type="primary", use_container_width=True):
+                with st.spinner("Initializing camera system..."):
+                    scanner_results = run_unified_scanner()
+                    if scanner_results:
+                        st.session_state['optical_results'] = scanner_results
+                        st.success("Diagnostic scan completed successfully!")
+                        st.rerun()
+                    else:
+                        st.warning("Scanner cancelled or closed without results.")
+
+            if st.session_state.get('optical_results'):
+                res = st.session_state['optical_results']
+                st.divider()
+                st.markdown('<div class="section-label">Scan Results & Clinical Advice</div>', unsafe_allow_html=True)
+                
+                # Clinical Logic
+                status = "Optimal"
+                advice = "Your lens health and pupillary reflex are within the youthful/healthy range. No immediate action required."
+                interval = "Routine check in 6 months"
+                clr = "#0d9488" # Teal
+                
+                # Check thresholds (Neural Clarity & Calibrated Aging)
+                if res['clarity'] < 100:
+                    status = "Critical"
+                    advice = "Significant irregularities in lens sharpness detected. Avoid driving and consult an ophthalmologist immediately for a comprehensive exam."
+                    interval = "Immediate Consultation Required"
+                    clr = "#dc2626" # Red
+                elif res['clarity'] < 160 or res['age_index'] > 1.25:
+                    status = "Warning"
+                    advice = "Moderate signs of lens maturity detected. Please re-scan in 48 hours for consistency. Consult an optometrist if symptoms persist."
+                    interval = "Follow-up in 48 Hours"
+                    clr = "#d97706" # Orange
+
+                # Result Header
+                st.markdown(f"""
+                <div style="background:{clr}15; border:1px solid {clr}40; padding:20px; border-radius:12px; margin-bottom:20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <h2 style="margin:0; color:{clr};">Status: {status}</h2>
+                        <span style="font-weight:700; color:{clr}; background:{clr}25; padding:4px 12px; border-radius:20px; font-size:14px;">{interval}</span>
+                    </div>
+                    <p style="margin:10px 0 0; font-size:15px; color:{'#94a3b8' if st.session_state['dark_mode'] else '#475569'};">{advice}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                col1, col2 = st.columns([1, 1.2])
+                with col1:
+                    if res.get('heatmap_path') and os.path.exists(res['heatmap_path']):
+                        st.image(res['heatmap_path'], caption="Optical Density Heatmap", use_container_width=True)
+                    else:
+                        st.caption("Heatmap unavailable")
+                
+                with col2:
+                    st.markdown("**Metric Breakdown**")
+                    
+                    def metric_row(label, value, target, unit="", higher_is_better=False):
+                        is_good = (value < target) if not higher_is_better else (value > target)
+                        icon = "✅" if is_good else "⚠️"
+                        st.markdown(f"""
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(148,163,184,0.1);">
+                            <span style="font-size:14px;">{icon} {label}</span>
+                            <span style="font-weight:700; font-size:14px;">{value:.1f}{unit}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    metric_row("Clarity (Sharpness)", res['clarity'], 160, "", True)
+                    metric_row("Lens Stability", res['stability'], 8)
+                    metric_row("Age Index (Calibrated)", res['age_index'], 1.25)
+
+                st.write("")
+                if st.button("Archive & Re-scan", use_container_width=True):
+                    del st.session_state['optical_results']
+                    st.rerun()
 
         # ── Medical History Form page ───────────────────────────
         elif st.session_state['page'] == 'medical_history_form':
