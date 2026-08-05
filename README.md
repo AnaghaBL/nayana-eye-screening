@@ -234,13 +234,8 @@ Team
 
 Anagha (Hardware Integration)
 
-Medha (Raspberry Pi Setup, Optical Assembly)
+Medha (Raspberry Pi Setup, Optical Assembly, UI)
 
-Khushi (Frontend \& UI)
+Khushi (Frontend & UI)
 
-
-
-License
-
-MIT License (or specify your license)
-
+Nisarga (Hardware) 
