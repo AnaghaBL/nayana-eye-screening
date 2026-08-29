@@ -1,0 +1,16 @@
+streamlit
+opencv-python
+numpy
+torch
+torchvision
+timm
+pillow
+matplotlib
+pytorch-grad-cam
+reportlab
+deep-translator
+speechrecognition
+pyaudio
+flask
+requests
+cryptography

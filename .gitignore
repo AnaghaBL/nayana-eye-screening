@@ -1,4 +1,4 @@
-odir_model.pth
+
 eye_model_v2_best.pth
 retina_model.pth
 *.json
@@ -7,3 +7,5 @@ doctor_docs/
 __pycache__/
 *.pyc
 .env
+odir_model.pth.zip
+*.log
